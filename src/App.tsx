@@ -31,7 +31,10 @@ import {
   STORAGE_KEY,
 } from "./library";
 import { GENRES, LANGUAGES, PAGE_SIZE } from "./catalog";
-import Reader, { readPosition } from "./Reader";
+import Reader from "./Reader";
+import Updates from "./Updates";
+import Recommendations from "./Recommendations";
+import { chapterIndex, LANGUAGE_KEY, preferredLanguage as readLanguage, readPosition } from "./reading";
 import type {
   Chapter,
   Collection,
@@ -141,6 +144,8 @@ function Details({
   onUpdate,
   onRemove,
   preferredLanguage,
+  startReading,
+  requestedChapter,
 }: {
   manga: Manga;
   item?: CollectionItem;
@@ -148,6 +153,8 @@ function Details({
   onUpdate: (patch: Partial<CollectionItem>) => boolean;
   onRemove: () => void;
   preferredLanguage: string;
+  startReading: boolean;
+  requestedChapter: Chapter | null;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -155,14 +162,20 @@ function Details({
   const [error, setError] = useState("");
   const [chapter, setChapter] = useState(item?.chapter || "");
   const [notice, setNotice] = useState("");
-  const [chapterPage, setChapterPage] = useState(1);
+  const initialPosition = useRef(startReading && !requestedChapter ? readPosition(manga.id) : null);
+  const [chapterPage, setChapterPage] = useState(initialPosition.current?.feedPage || 1);
+  const [fetchTick, setFetchTick] = useState(0);
+  const [navigationError, setNavigationError] = useState("");
+  const pendingStart = useRef(startReading || !!requestedChapter);
+  const desiredChapter = useRef(requestedChapter || (!initialPosition.current?.completed ? initialPosition.current?.chapter : null) || null);
+  const locator = useRef<Record<string, string>>(desiredChapter.current ? { chapterId: desiredChapter.current.id, ...(desiredChapter.current.number !== null ? { chapterNumber: desiredChapter.current.number } : {}) } : startReading && item?.chapter ? { after: item.chapter } : {});
   const [chapterTotal, setChapterTotal] = useState(0);
   const [reading, setReading] = useState<Chapter | null>(null);
   const [readingPage, setReadingPage] = useState(1);
   const pendingNavigation = useRef<-1 | 1 | null>(null);
   const resume = readPosition(manga.id);
   const [chapterLanguage, setChapterLanguage] = useState(
-    preferredLanguage === "all" ? "pt-br" : preferredLanguage,
+    requestedChapter ? (requestedChapter.language === "en" ? "en" : "pt-br") : initialPosition.current?.feedLanguage || (preferredLanguage === "en" ? "en" : "pt-br"),
   );
   useEffect(() => {
     dialog.current?.showModal();
@@ -171,7 +184,8 @@ function Details({
     const controller = new AbortController();
     setLoading(true);
     setError("");
-    fetch(`/api/manga/${manga.id}/chapters?language=${chapterLanguage}&page=${chapterPage}`, {
+    const params = new URLSearchParams({ language: chapterLanguage, page: String(chapterPage), ...locator.current });
+    fetch(`/api/manga/${manga.id}/chapters?${params}`, {
       signal: controller.signal,
     })
       .then(async (r) => {
@@ -183,29 +197,48 @@ function Details({
         if (controller.signal.aborted) return;
         setChapters(d.items);
         setChapterTotal(d.total);
+        locator.current = {};
+        if (d.page !== chapterPage) setChapterPage(d.page);
+        if (pendingStart.current) {
+          pendingStart.current = false;
+          const primary = d.items.find((c: Chapter) => c.id === d.startId) || (!desiredChapter.current ? d.items[0] : null);
+          if (!primary && desiredChapter.current) setError("Este capítulo não está mais disponível. Escolha outro da lista.");
+          if (primary) {
+            const wanted = desiredChapter.current;
+            const oldVersion = primary.alternatives?.find((c: Chapter) => c.id === wanted?.id);
+            const { alternatives, ...defaultVersion } = primary;
+            const chosen = oldVersion ? { ...oldVersion, alternatives: [defaultVersion, ...alternatives.filter((c: Chapter) => c.id !== oldVersion.id)] } : primary;
+            setReadingPage(d.page); setReading(chosen); onUpdate({ status: "reading" });
+          }
+        }
         if (pendingNavigation.current) {
           const next = pendingNavigation.current === 1 ? d.items[0] : d.items.at(-1);
-          if (next) { setReadingPage(chapterPage); setReading(next); }
+          if (next) { setReadingPage(d.page); setReading(next); }
           pendingNavigation.current = null;
         }
       })
       .catch((e) => {
-        if (e.name !== "AbortError") setError(e.message);
+        if (e.name !== "AbortError") {
+          setError(e.message);
+          if (pendingNavigation.current) { pendingNavigation.current = null; setNavigationError(e.message); setChapterPage(readingPage); }
+        }
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [manga.id, chapterLanguage, chapterPage]);
-  const readingIndex = chapters.findIndex(c => c.id === reading?.id);
+  }, [manga.id, chapterLanguage, chapterPage, fetchTick]);
+  const readingIndex = chapterIndex(chapters, reading);
   const canPrevious = readingIndex > 0 || chapterPage > 1;
   const canNext = readingIndex >= 0 && readingIndex < chapters.length - 1 || chapterPage * 40 < Math.min(chapterTotal, 10000);
   function openChapter(c: Chapter, page = chapterPage) {
+    setNavigationError("");
     onUpdate({ status: "reading" });
     setReadingPage(page);
     setReading(c);
   }
   function navigateChapter(direction: -1 | 1) {
+    setNavigationError("");
     const next = chapters[readingIndex + direction];
     if (readingIndex >= 0 && next) openChapter(next);
     else {
@@ -342,7 +375,7 @@ function Details({
             <select
               aria-label="Idioma da leitura"
               value={chapterLanguage}
-              onChange={(e) => { setChapterLanguage(e.target.value); setChapterPage(1); }}
+              onChange={(e) => { setChapterLanguage(e.target.value === "en" ? "en" : "pt-br"); setChapterPage(1); }}
             >
               {LANGUAGES.map(([value, label]) => (
                 <option key={value} value={value}>
@@ -354,7 +387,10 @@ function Details({
           {resume && <button className="primary-button resume-button" onClick={() => {
             setChapterLanguage(resume.feedLanguage);
             setChapterPage(resume.feedPage);
-            openChapter(resume.chapter, resume.feedPage);
+            desiredChapter.current = resume.chapter;
+            locator.current = { chapterId: resume.chapter.id, ...(resume.chapter.number !== null ? { chapterNumber: resume.chapter.number } : {}) };
+            pendingStart.current = true;
+            setFetchTick(fetchTick + 1);
           }}>Retomar leitura · Cap. {resume.chapter.number || "especial"}</button>}
           {loading ? (
             <p className="muted loading-inline">
@@ -417,8 +453,8 @@ function Details({
       </div>
     </dialog>
     {reading && <Reader key={reading.id} manga={manga} chapter={reading} chapters={chapters}
-      feedPage={readingPage} feedLanguage={chapterLanguage} canPrevious={canPrevious} canNext={canNext} navigating={loading}
-      onNavigate={navigateChapter} onSelect={openChapter} onClose={() => { pendingNavigation.current = null; setReading(null); }}
+      feedPage={readingPage} feedLanguage={chapterLanguage} canPrevious={canPrevious} canNext={canNext} navigating={loading} navigationError={navigationError}
+      onNavigate={navigateChapter} onSelect={openChapter} onClose={() => { pendingNavigation.current = null; setReading(null); if (startReading || requestedChapter) onClose(); }}
       onComplete={() => {
         if (!reading.number || !/^\d+(?:\.\d+)?$/.test(reading.number)) return false;
         const latest = Number(item?.chapter || 0) > Number(reading.number) ? item!.chapter : reading.number;
@@ -524,7 +560,8 @@ export default function App() {
   const [filter, setFilter] = useState("all");
   const [genre, setGenre] = useState("all");
   const [publicationFilter, setPublicationFilter] = useState("all");
-  const [language, setLanguage] = useState("pt-br");
+  const [readingLanguage, setReadingLanguage] = useState(readLanguage);
+  const [language, setLanguage] = useState<string>(readingLanguage);
   const [sort, setSort] = useState("popular");
   const [localSort, setLocalSort] = useState("updated");
   const [page, setPage] = useState(1);
@@ -540,6 +577,12 @@ export default function App() {
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
   const [selected, setSelected] = useState<Manga | null>(null);
+  const [directReading, setDirectReading] = useState(false);
+  const [requestedChapter, setRequestedChapter] = useState<Chapter | null>(null);
+  const collectionRef = useRef(collection); collectionRef.current = collection;
+  function openDetails(manga: Manga, direct = false, chapter: Chapter | null = null) {
+    setDirectReading(direct); setRequestedChapter(chapter); setSelected(manga);
+  }
   const catalog = useRef<HTMLElement>(null);
   const backupInput = useRef<HTMLInputElement>(null);
 
@@ -643,6 +686,7 @@ export default function App() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
       setStorageError("");
+      collectionRef.current = next;
       setCollection(next);
       return true;
     } catch {
@@ -654,9 +698,9 @@ export default function App() {
   }
   function update(manga: Manga, patch: Partial<CollectionItem> = {}) {
     return save({
-      ...collection,
+      ...collectionRef.current,
       [manga.id]: {
-        ...(collection[manga.id] || newItem(manga)),
+        ...(collectionRef.current[manga.id] || newItem(manga)),
         ...patch,
         manga,
         updatedAt: Date.now(),
@@ -675,7 +719,7 @@ export default function App() {
     setSearch("");
     setGenre("all");
     setPublicationFilter("all");
-    setLanguage(next === "discover" ? "pt-br" : "all");
+    setLanguage(next === "discover" ? readingLanguage : "all");
     setSort("popular");
     setLocalSort("updated");
     setKind("all");
@@ -704,7 +748,7 @@ export default function App() {
       (i) =>
         publicationFilter === "all" || i.manga.status === publicationFilter,
     )
-    .filter((i) => language === "all" || i.manga.languages.includes(language))
+    .filter((i) => language === "all" || i.manga.languages.includes(language) || language === "pt-br" && i.manga.languages.includes("pt"))
     .sort((a, b) =>
       localSort === "title"
         ? a.manga.title.localeCompare(b.manga.title, "pt-BR")
@@ -732,7 +776,7 @@ export default function App() {
     filter !== "all" ||
     genre !== "all" ||
     publicationFilter !== "all" ||
-    language !== (view === "discover" ? "pt-br" : "all") ||
+    language !== (view === "discover" ? readingLanguage : "all") ||
     kind !== "all";
   useEffect(() => {
     if (view !== "discover" && page > pageCount) setPage(pageCount);
@@ -789,13 +833,13 @@ export default function App() {
               : "Sua próxima história espera"}
           </span>
         </div>
-        <div className="ark-note">
+        <button className="ark-note" onClick={() => { navigate("discover"); setTimeout(() => document.getElementById("ark-recommendations")?.scrollIntoView({ behavior: "smooth" }), 0); }}>
           <div className="ark-note-title">
-            <Sparkles size={17} /> O próximo capítulo do ARK
+            <Sparkles size={17} /> Sugestões do ARK
           </div>
           <p>Um assistente para descobrir histórias que combinam com você.</p>
-          <span className="soon-badge">EM BREVE</span>
-        </div>
+          <span className="soon-badge">SUA IA LOCAL</span>
+        </button>
         <div className="sidebar-bottom">
           <div className="local-avatar">GU</div>
           <div>
@@ -876,6 +920,7 @@ export default function App() {
           </button>
         </header>
         <div className="main-content">
+          <Updates collection={collection} language={readingLanguage} onRead={(manga, chapter) => openDetails(manga, true, chapter)} />
           {view === "discover" && (
             <>
               <section className="hero">
@@ -985,7 +1030,7 @@ export default function App() {
                       <button
                         key={i.manga.id}
                         className="continue-card"
-                        onClick={() => setSelected(i.manga)}
+                        onClick={() => openDetails(i.manga, true)}
                       >
                         <Cover manga={i.manga} />
                         <div>
@@ -993,7 +1038,7 @@ export default function App() {
                           <strong>{i.manga.title}</strong>
                           <small>
                             {i.chapter
-                              ? `Você parou no capítulo ${i.chapter}`
+                              ? readPosition(i.manga.id)?.completed ? `Continuar após o capítulo ${i.chapter}` : `Continuar · Capítulo ${readPosition(i.manga.id)?.chapter.number ?? i.chapter}`
                               : "Pronto para começar"}
                           </small>
                         </div>
@@ -1005,6 +1050,7 @@ export default function App() {
               )}
             </>
           )}
+          {view === "discover" && <Recommendations collection={collection} language={readingLanguage} renderCard={manga => <MangaCard manga={manga} saved={collection[manga.id]} onOpen={() => openDetails(manga)} onSave={() => collection[manga.id] ? remove(manga.id) : update(manga)} />} />}
           <section className="catalog-section" ref={catalog}>
             <div className="section-heading catalog-heading">
               <div>
@@ -1025,7 +1071,7 @@ export default function App() {
                 </h2>
                 <p>
                   {view === "discover"
-                    ? `Uma seleção do MangaDex${language === "pt-br" ? ", com capítulos em português" : language === "en" ? ", com capítulos em inglês" : language === "es" ? ", com capítulos em espanhol" : ", para explorar em todos os idiomas"}.`
+                    ? `Uma seleção do MangaDex, com capítulos em ${language === "en" ? "inglês" : "português"}.`
                     : "Um espaço para cada história que faz parte do seu universo."}
                 </p>
               </div>
@@ -1122,7 +1168,7 @@ export default function App() {
               </div>
               <span className="catalog-language">
                 {view === "discover"
-                  ? `${language === "all" ? "Todos os idiomas" : language.toUpperCase()} · ${orderLabels[sort]}`
+                  ? `${language === "all" ? "Toda a coleção" : language === "en" ? "Inglês" : "Português"} · ${orderLabels[sort]}`
                   : `${displayedTotal} ${displayedTotal === 1 ? "obra" : "obras"}`}
               </span>
             </div>
@@ -1170,9 +1216,15 @@ export default function App() {
                   value={language}
                   onChange={(e) => {
                     setLanguage(e.target.value);
+                    if (e.target.value === "pt-br" || e.target.value === "en") {
+                      setReadingLanguage(e.target.value);
+                      try { localStorage.setItem(LANGUAGE_KEY, e.target.value); }
+                      catch { setBackupNotice({ type: "error", text: "Não foi possível guardar sua preferência de idioma." }); }
+                    }
                     setPage(1);
                   }}
                 >
+                  {view !== "discover" && <option value="all">Toda a coleção</option>}
                   {LANGUAGES.map(([value, label]) => (
                     <option key={value} value={value}>
                       {label}
@@ -1255,7 +1307,7 @@ export default function App() {
                     key={m.id}
                     manga={m}
                     saved={collection[m.id]}
-                    onOpen={() => setSelected(m)}
+                    onOpen={() => openDetails(m)}
                     onSave={() => (collection[m.id] ? remove(m.id) : update(m))}
                   />
                 ))}
@@ -1367,7 +1419,9 @@ export default function App() {
           onClose={() => setSelected(null)}
           onUpdate={(patch) => update(selected, patch)}
           onRemove={() => remove(selected.id)}
-          preferredLanguage={language}
+          preferredLanguage={language === "all" ? readingLanguage : language}
+          startReading={directReading}
+          requestedChapter={requestedChapter}
         />
       )}
       {backupPreview && (

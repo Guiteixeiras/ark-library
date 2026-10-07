@@ -1,4 +1,7 @@
+import { arkApi } from "./ark.mjs";
+import { groupChapters, chapterSlice } from "./chapters.mjs";
 const API = "https://api.mangadex.org";
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/avif"]);
 const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 const cache = new Map();
 const requests = new Map();
@@ -11,9 +14,9 @@ function reply(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-async function upstream(path) {
+async function upstream(path, fresh = false) {
   const cached = cache.get(path);
-  if (cached && cached.expires > Date.now()) return cached.data;
+  if (!fresh && cached && cached.expires > Date.now()) return cached.data;
   if (requests.has(path)) return requests.get(path);
   const pending = (async () => {
     const response = await fetch(`${API}${path}`, {
@@ -70,7 +73,8 @@ async function assignment(id, fresh = false) {
         !(base.hostname.endsWith(".mangadex.network") || base.hostname === "uploads.mangadex.org") ||
         !/^[a-f\d]{32}$/i.test(data.chapter?.hash) ||
         !Array.isArray(data.chapter.data) || !data.chapter.data.length || data.chapter.data.length > 1000 ||
-        data.chapter.data.some(file => !/^[\w.-]+\.(png|jpe?g|webp|gif)$/i.test(file)))
+        !Array.isArray(data.chapter.dataSaver) || data.chapter.dataSaver.length !== data.chapter.data.length ||
+        [...data.chapter.data, ...data.chapter.dataSaver].some(file => !/^[\w.-]+\.(png|jpe?g|webp|gif)$/i.test(file)))
       throw new Error("Resposta de leitura inválida.");
     if (assignments.size >= 200) assignments.delete(assignments.keys().next().value);
     assignments.set(id, { data, expires: Date.now() + 30000 });
@@ -78,6 +82,44 @@ async function assignment(id, fresh = false) {
   })();
   assignmentRequests.set(id, pending);
   try { return await pending; } finally { assignmentRequests.delete(id); }
+}
+
+const chapterIndexes = new Map();
+const indexRequests = new Map();
+function languageParams(params, language, key) {
+  for (const code of language === "pt-br" ? ["pt-br", "pt"] : ["en"])
+    params.append(key, code);
+}
+async function chapterIndex(id, language, fresh = false) {
+  const key = `${id}:${language}`;
+  if (!fresh && chapterIndexes.get(key)?.expires > Date.now()) return chapterIndexes.get(key).data;
+  if (indexRequests.has(key)) return indexRequests.get(key);
+  const pending = (async () => {
+    const raw = [];
+    let total = 0;
+    do {
+      const params = new URLSearchParams({ limit: "500", offset: String(raw.length),
+        "order[chapter]": "asc", "order[createdAt]": "asc", "includes[]": "scanlation_group",
+        includeExternalUrl: "0", includeUnavailable: "0" });
+      languageParams(params, language, "translatedLanguage[]");
+      const data = await upstream(`/manga/${id}/feed?${params}`, fresh);
+      raw.push(...data.data); total = data.total;
+      if (!data.data.length) break;
+    } while (raw.length < Math.min(total, 10000));
+    const data = { items: groupChapters(raw), truncated: total > 10000 };
+    if (chapterIndexes.size >= 80) chapterIndexes.delete(chapterIndexes.keys().next().value);
+    chapterIndexes.set(key, { data, expires: Date.now() + 120000 });
+    return data;
+  })();
+  indexRequests.set(key, pending);
+  try { return await pending; } finally { indexRequests.delete(key); }
+}
+function qualityMode(url) {
+  const quality = url.searchParams.get("quality") || "original";
+  if (!["original", "compressed"].includes(quality)) {
+    const error = new Error("Qualidade inválida."); error.status = 400; throw error;
+  }
+  return quality;
 }
 
 function localText(t = {}) {
@@ -116,6 +158,7 @@ function manga(item) {
 export async function apiMiddleware(req, res, next) {
   const url = new URL(req.url || "/", "http://localhost");
   if (!url.pathname.startsWith("/api/")) return next();
+  if (url.pathname.startsWith("/api/ark/")) return arkApi(req, res, url, { upstream, mapManga: manga }).catch(() => reply(res, 502, { error: "Não foi possível consultar as sugestões agora. Tente novamente." }));
   if (req.method !== "GET")
     return reply(res, 405, { error: "Método não permitido." });
   try {
@@ -140,7 +183,7 @@ export async function apiMiddleware(req, res, next) {
         !["all", "ongoing", "completed", "hiatus", "cancelled"].includes(
           status,
         ) ||
-        !["pt-br", "en", "es", "all"].includes(language) ||
+        !["pt-br", "en"].includes(language) ||
         !["popular", "latest", "title", "relevance"].includes(sort)
       )
         return reply(res, 400, { error: "Busca inválida." });
@@ -152,8 +195,7 @@ export async function apiMiddleware(req, res, next) {
       });
       params.append("contentRating[]", "safe");
       params.append("contentRating[]", "suggestive");
-      if (language !== "all")
-        params.append("availableTranslatedLanguage[]", language);
+      languageParams(params, language, "availableTranslatedLanguage[]");
       if (genre !== "all") params.append("includedTags[]", genre);
       if (status !== "all") params.append("status[]", status);
       if (query) params.set("title", query);
@@ -191,8 +233,8 @@ export async function apiMiddleware(req, res, next) {
         { signal: AbortSignal.timeout(12000) },
       );
       if (!response.ok) return reply(res, 502, { error: "Capa indisponível." });
-      const type = response.headers.get("content-type") || "";
-      if (!type.startsWith("image/"))
+      const type = (response.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+      if (!IMAGE_TYPES.has(type))
         return reply(res, 502, { error: "Capa indisponível." });
       const bytes = Buffer.from(await response.arrayBuffer());
       res.writeHead(200, {
@@ -212,40 +254,42 @@ export async function apiMiddleware(req, res, next) {
       const page = Number(url.searchParams.get("page") || 1);
       if (!Number.isInteger(page) || page < 1 || page > 250)
         return reply(res, 400, { error: "Página de capítulos inválida." });
-      if (!["pt-br", "en", "es", "all"].includes(language))
+      if (!["pt-br", "en"].includes(language))
         return reply(res, 400, { error: "Idioma inválido." });
-      const params = new URLSearchParams({
-        limit: "40",
-        offset: String((page - 1) * 40),
-        "order[chapter]": "asc",
-        "includes[]": "scanlation_group",
-        includeExternalUrl: "0",
-        includeUnavailable: "0",
-      });
-      if (language !== "all") params.set("translatedLanguage[]", language);
+      const chapterId = url.searchParams.get("chapterId");
+      const chapterNumber = url.searchParams.get("chapterNumber");
+      const after = url.searchParams.get("after");
+      if ((chapterId && !UUID.test(chapterId)) ||
+          [chapterNumber, after].some(n => n !== null && !/^\d+(?:\.\d+)?$/.test(n)))
+        return reply(res, 400, { error: "Posição de leitura inválida." });
+      let data = await chapterIndex(id, language);
+      let slice = chapterSlice(data.items, { page, chapterId, chapterNumber, after });
+      if ((chapterId || chapterNumber !== null) && !slice.startId) {
+        data = await chapterIndex(id, language, true);
+        slice = chapterSlice(data.items, { page, chapterId, chapterNumber, after });
+      }
+      return reply(res, 200, { ...slice, truncated: data.truncated });
+    }
+    const latestRoute = url.pathname.match(/^\/api\/manga\/([^/]+)\/latest$/);
+    if (latestRoute) {
+      const id = latestRoute[1], language = url.searchParams.get("language") || "pt-br";
+      if (!UUID.test(id) || !["pt-br", "en"].includes(language))
+        return reply(res, 400, { error: "Obra ou idioma inválido." });
+      const params = new URLSearchParams({ limit: "100", "order[chapter]": "desc",
+        "includes[]": "scanlation_group", includeExternalUrl: "0", includeUnavailable: "0" });
+      languageParams(params, language, "translatedLanguage[]");
       const data = await upstream(`/manga/${id}/feed?${params}`);
-      return reply(res, 200, {
-        total: data.total,
-        page,
-        items: data.data.map((c) => ({
-          id: c.id,
-          number: c.attributes.chapter,
-          title: c.attributes.title || "",
-          language: c.attributes.translatedLanguage,
-          group:
-            c.relationships.find((r) => r.type === "scanlation_group")
-              ?.attributes?.name || "Grupo não informado",
-          url: `https://mangadex.org/chapter/${c.id}`,
-        })),
-      });
+      const numbered = groupChapters(data.data).filter(c => /^\d+(?:\.\d+)?$/.test(c.number || ""));
+      return reply(res, 200, { chapter: numbered.at(-1) || null });
     }
     const pagesRoute = url.pathname.match(/^\/api\/chapter\/([^/]+)\/pages$/);
     if (pagesRoute) {
       const id = pagesRoute[1];
       if (!UUID.test(id)) return reply(res, 400, { error: "Capítulo inválido." });
+      const quality = qualityMode(url);
       const data = await assignment(id, true);
       return reply(res, 200, {
-        pages: data.chapter.data.map((_, index) => `/api/chapter/${id}/image/${index}`),
+        quality, pages: data.chapter.data.map((_, index) => `/api/chapter/${id}/image/${index}${quality === "compressed" ? "?quality=compressed" : ""}`),
       });
     }
     const imageRoute = url.pathname.match(/^\/api\/chapter\/([^/]+)\/image\/(\d+)$/);
@@ -254,21 +298,24 @@ export async function apiMiddleware(req, res, next) {
       const index = Number(rawIndex);
       if (!UUID.test(id) || !Number.isSafeInteger(index) || index > 1000)
         return reply(res, 400, { error: "Página inválida." });
+      const quality = qualityMode(url);
       const data = await assignment(id);
-      if (!data.chapter.data[index]) return reply(res, 404, { error: "Página não encontrada." });
-      const imageUrl = `${data.baseUrl.replace(/\/$/, "")}/data/${data.chapter.hash}/${data.chapter.data[index]}`;
+      const files = quality === "original" ? data.chapter.data : data.chapter.dataSaver;
+      if (!files[index]) return reply(res, 404, { error: "Página não encontrada." });
+      const imageUrl = `${data.baseUrl.replace(/\/$/, "")}/${quality === "original" ? "data" : "data-saver"}/${data.chapter.hash}/${files[index]}`;
       const started = performance.now();
       let bytes = 0, cached = false, success = false;
       try {
         const response = await fetch(imageUrl, { signal: AbortSignal.timeout(20000), redirect: "error" });
         cached = (response.headers.get("x-cache") || "").startsWith("HIT");
-        if (!response.ok || !(response.headers.get("content-type") || "").startsWith("image/"))
+        const type = (response.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+        if (!response.ok || !IMAGE_TYPES.has(type))
           throw new Error("Página indisponível.");
         const body = Buffer.from(await response.arrayBuffer());
         bytes = body.length;
         success = true;
         res.writeHead(200, {
-          "Content-Type": response.headers.get("content-type"),
+          "Content-Type": type,
           "Cache-Control": "no-store",
           "X-Content-Type-Options": "nosniff",
         });

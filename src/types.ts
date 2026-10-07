@@ -21,6 +21,8 @@ export type CollectionItem = {
 };
 export type Collection = Record<string, CollectionItem>;
 export type Chapter = {
+  volume?: string | null;
+  alternatives?: Chapter[];
   id: string;
   number: string | null;
   title: string;

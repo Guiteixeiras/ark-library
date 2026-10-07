@@ -66,6 +66,4 @@ export const GENRES = [
 export const LANGUAGES = [
   ["pt-br", "Português"],
   ["en", "Inglês"],
-  ["es", "Espanhol"],
-  ["all", "Todos os idiomas"],
 ];
