@@ -10,6 +10,8 @@ export type Manga = {
   tags: string[];
   languages: string[];
   url: string;
+  rating?: number;
+  followers?: number;
 };
 export type ReadingStatus = "planned" | "reading" | "completed";
 export type CollectionItem = {
@@ -30,3 +32,4 @@ export type Chapter = {
   group: string;
   url: string;
 };
+export type Release = { key: string; manga: Manga; chapter: Chapter; publishedAt: string };

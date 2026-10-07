@@ -20,11 +20,11 @@ function PageImage({ url, index, eager, onReady }: {
   </figure>;
 }
 
-export default function Reader({ manga, chapter, chapters, feedPage, feedLanguage, canPrevious, canNext, navigating, navigationError, onNavigate, onSelect, onClose, onComplete }: {
+export default function Reader({ manga, chapter, chapters, feedPage, feedLanguage, canPrevious, canNext, navigating, navigationError, onNavigate, onSelect, onClose, onComplete, onRead }: {
   manga: Manga; chapter: Chapter; chapters: Chapter[]; feedPage: number; feedLanguage: string;
   canPrevious: boolean; canNext: boolean; navigating: boolean; navigationError: string;
   onNavigate: (direction: -1 | 1) => void; onSelect: (chapter: Chapter) => void;
-  onClose: () => void; onComplete: () => boolean;
+  onClose: () => void; onComplete: (chapter: Chapter) => boolean; onRead: (chapter: Chapter) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
@@ -35,6 +35,7 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
   const restoring = useRef(!!saved);
   const ready = useRef(new Map<number, boolean>());
   const visited = useRef(new Set<number>());
+  const recorded = useRef(new Set<string>());
   const [active, setActive] = useState(chapter);
   const [prefs, setPrefs] = useState(readReaderPreferences);
   const [currentPage, setCurrentPage] = useState(saved?.page || 0);
@@ -126,7 +127,7 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
 
   function markComplete() {
     if (completed.current || active.number === null) return;
-    if (onComplete()) { completed.current = true; setDone(true); }
+    if (onComplete(active)) { completed.current = true; setDone(true); }
     else setNotice("O navegador não conseguiu salvar o capítulo lido. Libere espaço e tente novamente.");
   }
   function maybeComplete() {
@@ -146,6 +147,7 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
   }, [pages, prefs.mode, currentPage]);
 
   function pageReady(index: number, ok: boolean, width?: number, height?: number) {
+    if (ok && !recorded.current.has(active.id)) { recorded.current.add(active.id); onRead(active); }
     ready.current.set(index, ok);
     if (ok && (prefs.mode === "vertical" || index === currentPageRef.current)) visited.current.add(index);
     if (ok && (index === currentPageRef.current || index === 0)) setDimensions(`${width} × ${height}`);

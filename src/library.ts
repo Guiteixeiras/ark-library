@@ -9,7 +9,7 @@ const text = (v: unknown, max: number): v is string =>
 const strings = (v: unknown, max: number): v is string[] =>
   Array.isArray(v) && v.length <= max && v.every((s) => text(s, 150));
 
-function validItem(value: unknown): value is CollectionItem {
+export function validItem(value: unknown): value is CollectionItem {
   if (!value || typeof value !== "object") return false;
   const item = value as Partial<CollectionItem>;
   const m = item.manga as Partial<Manga> | undefined;
@@ -44,7 +44,7 @@ function validItem(value: unknown): value is CollectionItem {
   );
 }
 
-function cleanItem(item: CollectionItem): CollectionItem {
+export function cleanItem(item: CollectionItem): CollectionItem {
   const {
     id,
     title,
@@ -108,7 +108,7 @@ export function createBackup(collection: Collection): string {
 }
 
 export function parseBackup(contents: string): Collection {
-  if (contents.length > MAX_BACKUP_BYTES)
+  if (new TextEncoder().encode(contents).byteLength > MAX_BACKUP_BYTES)
     throw new Error("O backup deve ter no máximo 10 MB.");
   let raw: unknown;
   try {

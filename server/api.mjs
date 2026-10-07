@@ -1,5 +1,6 @@
 import { arkApi } from "./ark.mjs";
 import { groupChapters, chapterSlice } from "./chapters.mjs";
+import { featuredManga, featuredSlice, releaseFeed } from "./discovery.mjs";
 const API = "https://api.mangadex.org";
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/avif"]);
 const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
@@ -164,6 +165,12 @@ export async function apiMiddleware(req, res, next) {
   try {
     if (url.pathname === "/api/health")
       return reply(res, 200, { ok: true, service: "ark-library" });
+    if (url.pathname === "/api/releases") {
+      const language = url.searchParams.get("language") || "pt-br";
+      if (!["pt-br", "en"].includes(language)) return reply(res, 400, { error: "Idioma inválido." });
+      const featured = await featuredManga(upstream, manga, language);
+      return reply(res, 200, await releaseFeed(upstream, featured, language));
+    }
     if (url.pathname === "/api/catalog") {
       const query = (url.searchParams.get("query") || "").trim();
       const kind = url.searchParams.get("kind") || "all";
@@ -171,6 +178,7 @@ export async function apiMiddleware(req, res, next) {
       const genre = url.searchParams.get("genre") || "all";
       const status = url.searchParams.get("status") || "all";
       const language = url.searchParams.get("language") || "pt-br";
+      const scope = url.searchParams.get("scope") || "all";
       const sort =
         url.searchParams.get("sort") || (query ? "relevance" : "popular");
       if (
@@ -184,9 +192,19 @@ export async function apiMiddleware(req, res, next) {
           status,
         ) ||
         !["pt-br", "en"].includes(language) ||
-        !["popular", "latest", "title", "relevance"].includes(sort)
+        !["featured", "all"].includes(scope) ||
+        !["popular", "rating", "latest", "title", "relevance"].includes(sort)
       )
         return reply(res, 400, { error: "Busca inválida." });
+      if (scope === "featured" && !query) {
+        const items = await featuredManga(upstream, manga, language);
+        let genreName = null;
+        if (genre !== "all") {
+          const tags = await upstream("/manga/tag");
+          genreName = tags.data.find(t => t.id === genre)?.attributes.name.en || "unknown";
+        }
+        return reply(res, 200, featuredSlice(items, { query, kind, genreName, status, sort, page }));
+      }
       const params = new URLSearchParams({
         limit: String(Math.min(24, 10000 - (page - 1) * 24)),
         offset: String((page - 1) * 24),
@@ -202,6 +220,7 @@ export async function apiMiddleware(req, res, next) {
       const order =
         sort === "title"
           ? "title"
+          : sort === "rating" ? "rating"
           : sort === "latest"
             ? "latestUploadedChapter"
             : sort === "relevance" && query

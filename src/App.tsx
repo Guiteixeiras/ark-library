@@ -19,14 +19,13 @@ import {
   Sparkles,
   Sun,
   Upload,
+  History as HistoryIcon,
+  Clock3,
   X,
 } from "lucide-react";
 import {
-  createBackup,
   MAX_BACKUP_BYTES,
-  mergeCollections,
   newItem,
-  parseBackup,
   readCollection,
   STORAGE_KEY,
 } from "./library";
@@ -34,6 +33,10 @@ import { GENRES, LANGUAGES, PAGE_SIZE } from "./catalog";
 import Reader from "./Reader";
 import Updates from "./Updates";
 import Recommendations from "./Recommendations";
+import Releases from "./Releases";
+import { History, Lists, ListMembership } from "./PersonalLibrary";
+import { createFullBackup, parseFullBackup, PERSONAL_KEY, readPersonal, recordReading, restoreFullBackup } from "./personal";
+import type { FullBackup, Personal } from "./personal";
 import { chapterIndex, LANGUAGE_KEY, preferredLanguage as readLanguage, readPosition } from "./reading";
 import type {
   Chapter,
@@ -54,9 +57,10 @@ const publication: Record<string, string> = {
   hiatus: "Em pausa",
   cancelled: "Cancelado",
 };
-type View = "discover" | "collection" | "favorites";
+type View = "discover" | "collection" | "favorites" | "history";
 const orderLabels: Record<string, string> = {
   popular: "Mais populares",
+  rating: "Melhor avaliados",
   latest: "Atualizações recentes",
   title: "Título A–Z",
   relevance: "Relevância",
@@ -133,6 +137,7 @@ function MangaCard({
         {saved?.chapter && <span>Cap. {saved.chapter}</span>}
         {!saved && manga.year && <span>{manga.year}</span>}
       </div>
+      {!saved && manga.rating !== undefined && <div className="card-rating">★ {manga.rating.toFixed(1)} <span>· {new Intl.NumberFormat('pt-BR', { notation: 'compact' }).format(manga.followers || 0)} seguidores</span></div>}
     </article>
   );
 }
@@ -146,6 +151,9 @@ function Details({
   preferredLanguage,
   startReading,
   requestedChapter,
+  personal,
+  onPersonalSave,
+  onHistory,
 }: {
   manga: Manga;
   item?: CollectionItem;
@@ -155,6 +163,9 @@ function Details({
   preferredLanguage: string;
   startReading: boolean;
   requestedChapter: Chapter | null;
+  personal: Personal;
+  onPersonalSave: (p: Personal) => boolean;
+  onHistory: (chapter: Chapter, completed?: boolean) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -363,6 +374,7 @@ function Details({
             {notice}
           </p>
         </section>
+        <ListMembership manga={manga} personal={personal} onSave={onPersonalSave} ensureSaved={() => !!item || onUpdate({})} />
         <section className="chapter-section">
           <div className="section-heading">
             <h3>Capítulos disponíveis</h3>
@@ -455,11 +467,12 @@ function Details({
     {reading && <Reader key={reading.id} manga={manga} chapter={reading} chapters={chapters}
       feedPage={readingPage} feedLanguage={chapterLanguage} canPrevious={canPrevious} canNext={canNext} navigating={loading} navigationError={navigationError}
       onNavigate={navigateChapter} onSelect={openChapter} onClose={() => { pendingNavigation.current = null; setReading(null); if (startReading || requestedChapter) onClose(); }}
-      onComplete={() => {
-        if (!reading.number || !/^\d+(?:\.\d+)?$/.test(reading.number)) return false;
-        const latest = Number(item?.chapter || 0) > Number(reading.number) ? item!.chapter : reading.number;
+      onRead={chapter => onHistory(chapter)}
+      onComplete={active => {
+        if (!active.number || !/^\d+(?:\.\d+)?$/.test(active.number)) return false;
+        const latest = Number(item?.chapter || 0) > Number(active.number) ? item!.chapter : active.number;
         const saved = onUpdate({ chapter: latest, status: "reading" });
-        if (saved) setChapter(latest);
+        if (saved) { setChapter(latest); onHistory(active, true); }
         return saved;
       }} />}
     </>
@@ -472,12 +485,14 @@ function BackupPreview({
   error,
   onClose,
   onRestore,
+  workspace,
 }: {
   incoming: Collection;
   current: Collection;
   error: string;
   onClose: () => void;
   onRestore: () => void;
+  workspace?: FullBackup['workspace'];
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -530,6 +545,7 @@ function BackupPreview({
           Nenhuma obra atual será removida. Para obras repetidas, os dados mais
           recentes serão mantidos.
         </p>
+        {workspace && <p>Também serão combinadas {workspace.personal.lists.length} listas e {workspace.personal.history.length} entradas de histórico. Tema, idioma e controles do leitor serão restaurados; posições mais recentes neste navegador serão preservadas.</p>}
         {error && (
           <p role="alert" className="error-copy">
             {error}
@@ -551,6 +567,10 @@ function BackupPreview({
 export default function App() {
   const [view, setView] = useState<View>("discover");
   const [collection, setCollection] = useState<Collection>(readCollection);
+  const [personal, setPersonal] = useState(readPersonal);
+  const personalRef = useRef(personal); personalRef.current = personal;
+  const [activeList, setActiveList] = useState('all');
+  const [scope, setScope] = useState('featured');
   const [storageError, setStorageError] = useState("");
   const [items, setItems] = useState<Manga[]>([]);
   const [total, setTotal] = useState(0);
@@ -568,7 +588,7 @@ export default function App() {
   const [theme, setTheme] = useState<"light" | "dark">(() =>
     document.documentElement.dataset.theme === "dark" ? "dark" : "light",
   );
-  const [backupPreview, setBackupPreview] = useState<Collection | null>(null);
+  const [backupPreview, setBackupPreview] = useState<FullBackup | null>(null);
   const [backupNotice, setBackupNotice] = useState<{
     type: "success" | "error";
     text: string;
@@ -607,8 +627,9 @@ export default function App() {
   }
 
   function exportCollection() {
+    try {
     const url = URL.createObjectURL(
-      new Blob([createBackup(collection)], { type: "application/json" }),
+      new Blob([createFullBackup(collection, personal, localStorage, theme)], { type: "application/json" }),
     );
     const link = document.createElement("a");
     link.href = url;
@@ -617,8 +638,9 @@ export default function App() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     setBackupNotice({
       type: "success",
-      text: "Backup da coleção exportado. Guarde o arquivo para restaurar suas leituras depois.",
+      text: "Backup exportado com coleção, listas, histórico, posições e preferências.",
     });
+    } catch (error) { setBackupNotice({ type: 'error', text: error instanceof Error ? error.message : 'Não foi possível preparar seu backup.' }); }
   }
 
   async function importCollection(file?: File) {
@@ -628,7 +650,7 @@ export default function App() {
     try {
       if (file.size > MAX_BACKUP_BYTES)
         throw new Error("O backup deve ter no máximo 10 MB.");
-      setBackupPreview(parseBackup(await file.text()));
+      setBackupPreview(parseFullBackup(await file.text()));
     } catch (e) {
       setBackupNotice({
         type: "error",
@@ -651,6 +673,7 @@ export default function App() {
       language,
       sort,
       page: String(page),
+      scope: search ? 'all' : scope,
     });
     fetch(`/api/catalog?${params}`, { signal: controller.signal })
       .then(async (r) => {
@@ -680,6 +703,7 @@ export default function App() {
     sort,
     page,
     retry,
+    scope,
   ]);
 
   function save(next: Collection) {
@@ -695,6 +719,13 @@ export default function App() {
       );
       return false;
     }
+  }
+  function savePersonal(next: Personal) {
+    try { localStorage.setItem(PERSONAL_KEY, JSON.stringify(next)); personalRef.current = next; setPersonal(next); setStorageError(''); return true; }
+    catch { setStorageError('Não foi possível salvar suas listas ou o histórico. Libere espaço e tente novamente.'); return false; }
+  }
+  function addHistory(manga: Manga, chapter: Chapter, completed = false) {
+    savePersonal(recordReading(personalRef.current, manga, chapter, completed));
   }
   function update(manga: Manga, patch: Partial<CollectionItem> = {}) {
     return save({
@@ -724,6 +755,7 @@ export default function App() {
     setLocalSort("updated");
     setKind("all");
     setPage(1);
+    setActiveList('all');
   }
 
   const saved = useMemo(
@@ -733,6 +765,7 @@ export default function App() {
   const reading = saved.filter((i) => i.status === "reading");
   const favorites = saved.filter((i) => i.favorite);
   const localItems = (view === "favorites" ? favorites : saved)
+    .filter(i => activeList === 'all' || personal.lists.find(l => l.id === activeList)?.mangaIds.includes(i.manga.id))
     .filter((i) => filter === "all" || i.status === filter)
     .filter((i) =>
       i.manga.title
@@ -777,7 +810,7 @@ export default function App() {
     genre !== "all" ||
     publicationFilter !== "all" ||
     language !== (view === "discover" ? readingLanguage : "all") ||
-    kind !== "all";
+    kind !== "all" || activeList !== 'all';
   useEffect(() => {
     if (view !== "discover" && page > pageCount) setPage(pageCount);
   }, [view, page, pageCount]);
@@ -822,6 +855,8 @@ export default function App() {
           >
             <Heart size={19} /> Favoritos <span>{favorites.length}</span>
           </button>
+          <button className={view === 'history' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('history')}><HistoryIcon size={19} /> Histórico <span>{personal.history.length}</span></button>
+          <button className="nav-item" onClick={() => { navigate('discover'); setTimeout(() => document.getElementById('recent-releases')?.scrollIntoView({ behavior: 'smooth' }), 0); }}><Clock3 size={19} /> Capítulos novos <ChevronRight size={15} /></button>
         </nav>
         <div className="sidebar-rule" />
         <div className="sidebar-caption">UM CAPÍTULO DE CADA VEZ</div>
@@ -858,7 +893,7 @@ export default function App() {
                 ? "Explorar"
                 : view === "collection"
                   ? "Minha coleção"
-                  : "Favoritos"}
+                  : view === 'favorites' ? "Favoritos" : "Histórico"}
             </strong>
           </div>
           <form
@@ -920,7 +955,9 @@ export default function App() {
           </button>
         </header>
         <div className="main-content">
+          {storageError && <div className="error-state" role="alert">{storageError}</div>}
           <Updates collection={collection} language={readingLanguage} onRead={(manga, chapter) => openDetails(manga, true, chapter)} />
+          {view === 'history' && <History personal={personal} query={query} onRead={(manga, chapter) => openDetails(manga, true, chapter)} onSave={savePersonal} />}
           {view === "discover" && (
             <>
               <section className="hero">
@@ -1050,7 +1087,9 @@ export default function App() {
               )}
             </>
           )}
+          {view === 'discover' && <Releases language={readingLanguage} collection={collection} personal={personal} onRead={(manga, chapter) => openDetails(manga, true, chapter)} />}
           {view === "discover" && <Recommendations collection={collection} language={readingLanguage} renderCard={manga => <MangaCard manga={manga} saved={collection[manga.id]} onOpen={() => openDetails(manga)} onSave={() => collection[manga.id] ? remove(manga.id) : update(manga)} />} />}
+          {view !== 'history' && <>
           <section className="catalog-section" ref={catalog}>
             <div className="section-heading catalog-heading">
               <div>
@@ -1063,7 +1102,7 @@ export default function App() {
                   {view === "discover"
                     ? search
                       ? `Resultados para “${search}”`
-                      : "Encontre sua próxima obsessão"
+                      : scope === 'featured' ? 'Populares e bem avaliados' : "Encontre sua próxima obsessão"
                     : view === "collection"
                       ? "Minha coleção"
                       : "Seus favoritos"}
@@ -1071,13 +1110,13 @@ export default function App() {
                 </h2>
                 <p>
                   {view === "discover"
-                    ? `Uma seleção do MangaDex, com capítulos em ${language === "en" ? "inglês" : "português"}.`
+                    ? !search && scope === 'featured' ? `Até 100 obras mais acompanhadas em ${language === 'en' ? 'inglês' : 'português'}, com nota mínima 7 e mil seguidores no MangaDex.` : `Uma seleção do MangaDex, com capítulos em ${language === "en" ? "inglês" : "português"}.`
                     : "Um espaço para cada história que faz parte do seu universo."}
                 </p>
               </div>
               {view === "discover" && !loading && !error && (
                 <span className="result-count">
-                  {total.toLocaleString("pt-BR")} histórias no catálogo{" "}
+                  {total.toLocaleString("pt-BR")} {scope === 'featured' && !search ? 'obras em destaque' : 'histórias no catálogo'}{" "}
                   <ArrowDown size={13} />
                 </span>
               )}
@@ -1126,6 +1165,8 @@ export default function App() {
                 </button>
               </div>
             )}
+            {view !== 'discover' && <Lists personal={personal} collection={collection} active={activeList} onSelect={id => { setActiveList(id); setPage(1); }} onSave={savePersonal} />}
+            {view === 'discover' && !search && <div className="filter-tabs discovery-tabs" aria-label="Seleção do catálogo"><button className={scope === 'featured' ? 'selected' : ''} aria-pressed={scope === 'featured'} onClick={() => { setScope('featured'); setSort('popular'); setPage(1); }}>Destaques conhecidos</button><button className={scope === 'all' ? 'selected' : ''} aria-pressed={scope === 'all'} onClick={() => { setScope('all'); setPage(1); }}>Catálogo completo</button></div>}
             <div className="catalog-toolbar">
               <div
                 className="filter-tabs"
@@ -1247,7 +1288,8 @@ export default function App() {
                   {view === "discover" ? (
                     <>
                       <option value="popular">Mais populares</option>
-                      <option value="latest">Atualizações recentes</option>
+                      <option value="rating">Melhor avaliados</option>
+                      {(scope === 'all' || search) && <option value="latest">Atualizações recentes</option>}
                       <option value="title">Título A–Z</option>
                       {search && <option value="relevance">Relevância</option>}
                     </>
@@ -1268,11 +1310,6 @@ export default function App() {
               >
                 <X size={12} /> Limpar filtros
               </button>
-            )}
-            {storageError && (
-              <div className="error-state" role="alert">
-                {storageError}
-              </div>
             )}
             {view === "discover" && loading ? (
               <div
@@ -1383,6 +1420,7 @@ export default function App() {
               </p>
             )}
           </section>
+          </>}
           <section className="nexus-note">
             <div className="nexus-icon">
               <Bookmark size={23} />
@@ -1422,24 +1460,32 @@ export default function App() {
           preferredLanguage={language === "all" ? readingLanguage : language}
           startReading={directReading}
           requestedChapter={requestedChapter}
+          personal={personal}
+          onPersonalSave={savePersonal}
+          onHistory={(chapter, completed) => addHistory(selected, chapter, completed)}
         />
       )}
       {backupPreview && (
         <BackupPreview
-          incoming={backupPreview}
+          incoming={backupPreview.collection}
+          workspace={backupPreview.workspace}
           current={collection}
           error={storageError}
           onClose={() => setBackupPreview(null)}
           onRestore={() => {
-            const count = Object.keys(backupPreview).length;
-            if (save(mergeCollections(collection, backupPreview))) {
+            const count = Object.keys(backupPreview.collection).length;
+            try {
+              const restored = restoreFullBackup(collectionRef.current, personalRef.current, backupPreview);
+              collectionRef.current = restored.collection; setCollection(restored.collection);
+              personalRef.current = restored.personal; setPersonal(restored.personal); setStorageError('');
+              if (restored.workspace) { setTheme(restored.workspace.theme); setReadingLanguage(restored.workspace.language); }
               setBackupPreview(null);
               navigate("collection");
               setBackupNotice({
                 type: "success",
                 text: `Backup importado: ${count} ${count === 1 ? "obra verificada" : "obras verificadas"}. Sua coleção foi combinada mantendo os dados mais recentes.`,
               });
-            }
+            } catch (error) { setStorageError(error instanceof Error ? error.message : 'Não foi possível restaurar o backup.'); }
           }}
         />
       )}
