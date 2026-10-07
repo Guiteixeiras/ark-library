@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: ark-library
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: npm ci --include=dev --no-audit --no-fund && npm test && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: "off"
+    envVars:
+      - key: NODE_VERSION
+        value: 24.19.0
+      - key: NODE_ENV
+        value: production
+      - key: ARK_REQUIRE_ACCESS
+        value: "true"
+      - key: ARK_ACCESS_USER
+        value: ark
+      - key: ARK_ACCESS_PASSWORD
+        generateValue: true

@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { resolve, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { apiMiddleware } from "./api.mjs";
+import { createAccessGuard } from "./access.mjs";
 
 const dist = fileURLToPath(new URL("../dist/", import.meta.url));
 const types = {
@@ -13,8 +14,10 @@ const types = {
   ".woff2": "font/woff2",
 };
 await readFile(resolve(dist, "index.html"));
+const allowAccess = createAccessGuard();
 
 createServer((req, res) => {
+  if (!allowAccess(req, res)) return;
   apiMiddleware(req, res, async () => {
     if (req.method !== "GET" && req.method !== "HEAD") {
       res.writeHead(405);

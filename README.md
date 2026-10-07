@@ -2,6 +2,12 @@
 
 Uma biblioteca pessoal de mangás, manhwas e manhuas. Catálogo real do MangaDex, coleção local e acompanhamento de leitura, com interface em português.
 
+## Publicar para uso pessoal
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Guiteixeiras/ark-library)
+
+O botão prepara um serviço Free na sua conta do Render, com HTTPS, Node 24 e senha de acesso gerada pela plataforma. Abra o painel do serviço após o deploy para obter `ARK_ACCESS_PASSWORD`; o usuário é `ark`. Consulte o [passo a passo de hospedagem](docs/hospedagem.md), incluindo transferência do backup, limites do plano e atualizações manuais. O Ollama local permanece opcional.
+
 ## Executar
 
 Requer Node.js 24 e npm.
@@ -51,7 +57,7 @@ O formato principal permanece v1, com a extensão opcional `workspace.version=1`
 
 Os idiomas disponíveis são Português (inclui pt-br e pt) e Inglês, com português por padrão e preferência persistida. Japonês fica para uma etapa futura. A coleção tem a opção Toda a coleção para mostrar todos os itens salvos sem filtro de idioma. Os detalhes de cada obra também têm seleção de idioma dos capítulos. Clique em um capítulo para ler dentro do ARK. O link da fonte continua disponível para créditos. A API permite navegar até os primeiros 10.000 resultados de uma busca; use os filtros para refinar resultados maiores.
 
-Os dados da coleção ficam neste navegador, sem conta ou sincronização entre dispositivos. Limpar os dados do site remove a coleção. A execução local não tem autenticação; hospedar com acesso privado exige controle de acesso no serviço de hospedagem. `private: true` no package.json só impede publicação acidental do pacote no npm.
+Os dados da coleção ficam neste navegador, sem conta ou sincronização entre dispositivos. Limpar os dados do site remove a coleção. O desenvolvimento local funciona sem senha; a execução de produção (`NODE_ENV=production`) exige `ARK_ACCESS_PASSWORD` por padrão. O Render configura a proteção automaticamente. Acesso privado não sincroniza coleções entre navegadores. `private: true` no package.json só impede publicação acidental do pacote no npm.
 
 Guarde uma cópia do backup antes de limpar os dados do navegador.
 
