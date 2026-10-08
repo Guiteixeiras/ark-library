@@ -42,3 +42,15 @@ test('Ollama integration uses installed models, collection context and real vali
     assert.equal(status, 200); assert.equal(result.connected, false);
   } finally { globalThis.fetch = original; }
 });
+
+test('hosted Ollama connection failure identifies a PC-only localhost configuration', async () => {
+  const original = globalThis.fetch;
+  const oldRender = process.env.RENDER;
+  try {
+    process.env.RENDER = 'true'; globalThis.fetch = async () => { throw Error('offline'); };
+    let result;
+    await arkApi({ method: 'GET' }, { writeHead() {}, end(body) { result = JSON.parse(body); } }, new URL('http://ark.test/api/ark/status'), {});
+    assert.equal(result.connected, false); assert.equal(result.reason, 'hosted-local-ollama');
+    assert.deepEqual(result.models, []);
+  } finally { globalThis.fetch = original; if (oldRender === undefined) delete process.env.RENDER; else process.env.RENDER = oldRender; }
+});

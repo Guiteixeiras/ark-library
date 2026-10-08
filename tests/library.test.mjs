@@ -122,3 +122,12 @@ test("stored valid collection survives validation; corrupted data cannot crash s
     else delete globalThis.localStorage;
   }
 });
+
+test('paused works survive export while older version-one readers retain a valid planned status', () => {
+  const collection = { [id]: entry({ status: 'paused' }) };
+  const backup = createBackup(collection);
+  assert.equal(JSON.parse(backup).items[0].status, 'planned');
+  assert.deepEqual(parseBackup(backup), collection);
+  const invalid = JSON.parse(backup); invalid.pausedIds.push('missing');
+  assert.throws(() => parseBackup(JSON.stringify(invalid)), /pausadas/);
+});

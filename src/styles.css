@@ -2358,3 +2358,16 @@ html[data-theme="dark"] .ai-connection > span.connected { background: #412456; c
   .sidebar nav { width: 100%; justify-content: space-between; }
   .sidebar .nav-item { min-width: 44px; min-height: 44px; }
 }
+
+/* Reader lives outside the library shell so reading uses the entire viewport. */
+html[data-reader-open="true"], html[data-reader-open="true"] body { overflow: hidden; }
+html[data-reader-open="true"] .app-shell { visibility: hidden; pointer-events: none; }
+.reader-dialog { position: fixed; inset: 0; width: 100%; border-radius: 0; }
+.reader-dialog::backdrop { background: #110d18; }
+.reader-toolbar[hidden] { display: none; }
+.reader-controls-handle { position: absolute; right: 16px; bottom: 16px; z-index: 5; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 10px 14px; border: 1px solid var(--purple); border-radius: 12px; background: var(--paper); color: inherit; box-shadow: 0 4px 20px #0006; }
+.reader-floating-notice { position: absolute; right: 16px; bottom: 72px; z-index: 5; max-width: min(500px, calc(100% - 32px)); padding: 12px; background: var(--paper); border-radius: 10px; }
+.reader-pages.screen-size { width: 100%; max-width: none; }
+.reader-pages.screen-size .reader-page img { width: auto; max-width: 100%; height: auto; margin-inline: auto; }
+.release-title { font: inherit; color: inherit; text-align: left; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: transparent; border: 0; padding: 0; cursor: pointer; }
+.release-title:hover { text-decoration: underline; }

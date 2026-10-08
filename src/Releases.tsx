@@ -10,8 +10,9 @@ function ReleaseCover({ manga }: { manga: Manga }) {
   return manga.cover && !failed ? <img loading="lazy" src={manga.cover} alt={`Capa de ${manga.title}`} onError={() => setFailed(true)} /> : <BookMarked size={24} aria-hidden="true" />;
 }
 
-export default function Releases({ language, collection, personal, onRead }: {
+export default function Releases({ language, collection, personal, onRead, onOpen }: {
   language: ReadingLanguage; collection: Collection; personal: Personal; onRead: (manga: Manga, chapter: Chapter) => void;
+  onOpen: (manga: Manga) => void;
 }) {
   const [items, setItems] = useState<Release[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,10 +50,10 @@ export default function Releases({ language, collection, personal, onRead }: {
     </div>
     {loading ? <p className="section-status" role="status">Conferindo os envios recentes…</p> : error ? <p className="error-copy" role="alert">{error} Use o botão de atualizar para tentar novamente.</p> : filtered.length ?
       <div className="release-grid">{(expanded ? filtered : filtered.slice(0, 6)).map(release => <article className="release-card" key={release.key}>
-        <button className="release-cover" onClick={() => onRead(release.manga, release.chapter)} aria-label={`Ler ${release.manga.title}, capítulo ${release.chapter.number ?? release.chapter.title}`}>
+        <button className="release-cover" onClick={() => onOpen(release.manga)} aria-label={`Ver obra ${release.manga.title}`}>
           <ReleaseCover manga={release.manga} /></button>
         <div><div className="release-labels">{isNew(release) ? <span className="new-badge">Novo</span> : <span className="release-opened">Já aberto / lido</span>}{collection[release.manga.id] && <span className="release-saved">Na coleção</span>}</div>
-          <h3>{release.manga.title}</h3><p>{release.chapter.number !== null ? `Capítulo ${release.chapter.number}` : release.chapter.title || 'Especial'} · {languageLabel(release.chapter.language)}</p>
+          <h3><button className="release-title" title={release.manga.title} onClick={() => onOpen(release.manga)}>{release.manga.title}</button></h3><p>{release.chapter.number !== null ? `Capítulo ${release.chapter.number}` : release.chapter.title || 'Especial'} · {languageLabel(release.chapter.language)}</p>
           <time dateTime={release.publishedAt}><Clock3 size={12} /> {new Date(release.publishedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}</time>
           <button className="text-link" onClick={() => onRead(release.manga, release.chapter)}>Ler no ARK <ArrowRight size={14} /></button>
         </div></article>)}</div> : <p className="section-status">{onlySaved ? 'Nenhum envio recente dos destaques salvos na sua coleção. Os avisos acima acompanham suas outras obras.' : 'Nenhum capítulo disponível entre os destaques consultados nesta semana. Sua biblioteca continua disponível.'}</p>}

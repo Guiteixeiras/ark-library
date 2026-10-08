@@ -35,7 +35,7 @@ export function validItem(value: unknown): value is CollectionItem {
     strings(m.tags, 64) &&
     strings(m.languages, 64) &&
     m.url === `https://mangadex.org/title/${m.id}` &&
-    ["planned", "reading", "completed"].includes(item.status || "") &&
+    ["planned", "reading", "completed", "paused"].includes(item.status || "") &&
     text(item.chapter, 12) &&
     /^(?:\d+(?:\.\d+)?)?$/.test(item.chapter) &&
     typeof item.favorite === "boolean" &&
@@ -100,7 +100,8 @@ export function createBackup(collection: Collection): string {
       app: "ark-library",
       version: 1,
       exportedAt: new Date().toISOString(),
-      items: Object.values(collection).map(cleanItem),
+      items: Object.values(collection).map(item => ({ ...cleanItem(item), status: item.status === 'paused' ? 'planned' : item.status })),
+      ...(Object.values(collection).some(item => item.status === 'paused') ? { pausedIds: Object.values(collection).filter(item => item.status === 'paused').map(item => item.manga.id) } : {}),
     },
     null,
     2,
@@ -123,6 +124,7 @@ export function parseBackup(contents: string): Collection {
     version?: unknown;
     exportedAt?: unknown;
     items?: unknown;
+    pausedIds?: unknown;
   };
   if (
     data.app !== "ark-library" ||
@@ -142,6 +144,11 @@ export function parseBackup(contents: string): Collection {
         "O backup contém uma obra inválida ou duplicada. Sua coleção foi preservada.",
       );
     result[item.manga.id] = cleanItem(item);
+  }
+  if (data.pausedIds !== undefined) {
+    if (!Array.isArray(data.pausedIds) || data.pausedIds.length > 5000 || new Set(data.pausedIds).size !== data.pausedIds.length || data.pausedIds.some(id => typeof id !== 'string' || !Object.hasOwn(result, id) || !['planned', 'paused'].includes(result[id].status)))
+      throw new Error('Obras pausadas inválidas no backup.');
+    for (const id of data.pausedIds) result[id].status = 'paused';
   }
   return result;
 }

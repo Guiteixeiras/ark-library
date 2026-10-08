@@ -11,6 +11,7 @@ export default function Recommendations({ collection, language, renderCard }: {
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState("");
   const [checking, setChecking] = useState(true);
+  const [connectionReason, setConnectionReason] = useState('');
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<Suggestion[]>([]);
   const [error, setError] = useState("");
@@ -23,9 +24,10 @@ export default function Recommendations({ collection, language, renderCard }: {
   useEffect(() => { generation.current?.abort(); setLoading(false); setItems([]); setMessage(""); setError(""); }, [language, model]);
   useEffect(() => {
     const controller = new AbortController(); setChecking(true);
-    fetch('/api/ark/status', { signal: controller.signal }).then(r => r.json()).then(data => {
+    fetch('/api/ark/status', { signal: controller.signal }).then(async r => { const data = await r.json(); if (!r.ok) throw new Error(data.error); return data; }).then(data => {
       if (controller.signal.aborted) return;
       setConnected(data.connected); setModels(data.models); setModel(data.defaultModel || "");
+      setConnectionReason(data.reason || '');
     }).catch(e => { if (e.name !== "AbortError") setConnected(false); })
       .finally(() => { if (!controller.signal.aborted) setChecking(false); });
     return () => controller.abort();
@@ -49,7 +51,7 @@ export default function Recommendations({ collection, language, renderCard }: {
     </div>
     <div className="ai-connection">
       <span className={connected ? "connected" : ""}>{checking ? "Verificando sua IA…" : connected ? "Ollama conectado" : "Ollama desconectado"}</span>
-      {!connected && !checking && <p>Inicie o Ollama e execute o ARK no seu PC para usar sua IA local.</p>}
+      {!connected && !checking && <p>{connectionReason === 'hosted-local-ollama' ? 'Este ARK está hospedado no Render e não consegue acessar o Ollama instalado no seu PC. Para usar sua IA local, execute ambos no PC. Recomendações neste site precisam de uma conexão de IA configurada para a hospedagem.' : 'O servidor do ARK não conseguiu conectar ao Ollama. Para usar sua IA local, inicie o Ollama e execute o ARK no mesmo PC.'}</p>}
       {!checking && <button className="secondary-button" onClick={() => setRetry(retry + 1)}><RefreshCw size={15} /> Verificar conexão</button>}
       {connected && !models.length && <p>Instale um modelo no Ollama para começar.</p>}
       {connected && !profile.length && <p>Adicione suas primeiras obras à coleção para receber sugestões.</p>}

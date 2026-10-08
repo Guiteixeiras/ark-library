@@ -58,3 +58,14 @@ test('failed restore rolls back staged preferences and leaves original collectio
   assert.throws(() => restoreFullBackup(collection, personal, incoming, storage), /restaurar/);
   assert.deepEqual(Object.fromEntries(storage.values), original);
 });
+
+test('screen-sized reading and collapsed controls round-trip with legacy-compatible settings', () => {
+  const storage = memory({ [READER_SETTINGS_KEY]: JSON.stringify({ mode: 'vertical', quality: 'original', size: 'screen', width: 900, controlsHidden: true }) });
+  const backup = createFullBackup(collection, personal, storage);
+  assert.equal(JSON.parse(backup).workspace.settings.size, 'fit');
+  const saved = parseFullBackup(backup);
+  assert.equal(saved.workspace.settings.size, 'screen');
+  assert.equal(saved.workspace.settings.controlsHidden, true);
+  const invalid = JSON.parse(backup); invalid.workspace.settings.controlsHidden = 'yes';
+  assert.throws(() => parseFullBackup(JSON.stringify(invalid)), /leitor/);
+});

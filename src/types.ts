@@ -13,7 +13,7 @@ export type Manga = {
   rating?: number;
   followers?: number;
 };
-export type ReadingStatus = "planned" | "reading" | "completed";
+export type ReadingStatus = "planned" | "reading" | "completed" | "paused";
 export type CollectionItem = {
   manga: Manga;
   status: ReadingStatus;

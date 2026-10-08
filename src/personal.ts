@@ -70,7 +70,8 @@ export function createFullBackup(collection: Collection, personal: Personal, sto
   const positions = Object.fromEntries(Object.keys(collection).flatMap(id => { const position = readPosition(id, storage); return position ? [[id, position]] : []; }));
   const workspace: WorkspaceBackup = { version: 1, personal, positions, settings: readReaderPreferences(storage),
     language: storage.getItem(LANGUAGE_KEY) === 'en' ? 'en' : 'pt-br', theme: theme || (storage.getItem('ark-library:theme:v1') === 'dark' ? 'dark' : 'light'), dismissed: readDismissed(storage) };
-  const result = JSON.stringify({ ...JSON.parse(createBackup(collection)), workspace }, null, 2);
+  const result = JSON.stringify({ ...JSON.parse(createBackup(collection)), workspace: { ...workspace,
+    ...(workspace.settings.size === 'screen' ? { settings: { ...workspace.settings, size: 'fit' }, screenFit: true } : {}) } }, null, 2);
   if (new TextEncoder().encode(result).byteLength > MAX_BACKUP_BYTES) throw new Error('Este backup excede 10 MB. Reduza o histórico antes de exportar.');
   return result;
 }
@@ -88,11 +89,12 @@ export function parseFullBackup(contents: string): FullBackup {
   }
   const s = workspace.settings;
   if (!s || !['vertical', 'paged'].includes(s.mode) || !['original', 'compressed'].includes(s.quality) || !['fit', 'native'].includes(s.size) ||
-      !finite(s.width) || s.width < 420 || s.width > 1100) throw new Error('Preferências do leitor inválidas.');
+      !finite(s.width) || s.width < 420 || s.width > 1100 || (s.controlsHidden !== undefined && typeof s.controlsHidden !== 'boolean') ||
+      (workspace.screenFit !== undefined && typeof workspace.screenFit !== 'boolean')) throw new Error('Preferências do leitor inválidas.');
   const dismissed = readDismissed({ getItem: () => JSON.stringify(workspace.dismissed) });
   if (!workspace.dismissed || typeof workspace.dismissed !== 'object' || Array.isArray(workspace.dismissed) ||
       Object.keys(dismissed).length !== Object.keys(workspace.dismissed).length) throw new Error('Avisos do backup inválidos.');
-  return { collection, workspace: { version: 1, personal: validatePersonal(workspace.personal), positions, settings: { ...s },
+  return { collection, workspace: { version: 1, personal: validatePersonal(workspace.personal), positions, settings: { ...s, ...(workspace.screenFit ? { size: 'screen' } : {}) },
     language: workspace.language, theme: workspace.theme, dismissed } };
 }
 // Stage every write and restore originals on failure; collection is committed last.

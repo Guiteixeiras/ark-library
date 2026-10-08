@@ -37,7 +37,7 @@ export function validateProfile(body) {
   return body.items.map(item => {
     if (!item || !UUID.test(item.id) || seen.has(item.id) || typeof item.title !== 'string' || item.title.length > 500 ||
         !Array.isArray(item.tags) || item.tags.length > 40 || item.tags.some(t => typeof t !== 'string' || t.length > 100) ||
-        !['planned', 'reading', 'completed'].includes(item.status) || typeof item.favorite !== 'boolean')
+        !['planned', 'reading', 'completed', 'paused'].includes(item.status) || typeof item.favorite !== 'boolean')
       throw new Error('Dados da coleção inválidos.');
     seen.add(item.id);
     return { id: item.id, title: item.title, tags: item.tags.filter(t => genres.has(t)), status: item.status, favorite: item.favorite };
@@ -74,7 +74,11 @@ export async function arkApi(req, res, url, { upstream, mapManga }) {
       const preferred = installed.includes(process.env.ARK_OLLAMA_MODEL) ? process.env.ARK_OLLAMA_MODEL
         : installed.find(name => name.toLowerCase().includes('llama')) || installed[0] || null;
       return reply(res, 200, { connected: true, models: installed, defaultModel: preferred });
-    } catch { return reply(res, 200, { connected: false, models: [], defaultModel: null }); }
+    } catch {
+      let reason = 'unreachable';
+      try { if (process.env.RENDER === 'true' && ['localhost', '127.0.0.1', '[::1]'].includes(new URL(ollamaBase()).hostname)) reason = 'hosted-local-ollama'; } catch { /* Invalid configuration stays unreachable. */ }
+      return reply(res, 200, { connected: false, models: [], defaultModel: null, reason });
+    }
   }
   if (url.pathname !== '/api/ark/recommendations') return reply(res, 404, { error: 'Recurso não encontrado.' });
   if (req.method !== 'POST') return reply(res, 405, { error: 'Método não permitido.' });

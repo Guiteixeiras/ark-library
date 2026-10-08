@@ -2,7 +2,7 @@ import type { Chapter } from "./types";
 export type ReadingLanguage = "pt-br" | "en";
 export type ReaderMode = "vertical" | "paged";
 export type ImageQuality = "original" | "compressed";
-export type ReaderPreferences = { mode: ReaderMode; quality: ImageQuality; size: "fit" | "native"; width: number };
+export type ReaderPreferences = { mode: ReaderMode; quality: ImageQuality; size: "fit" | "screen" | "native"; width: number; controlsHidden?: boolean };
 export type Position = { chapter: Chapter; feedLanguage: ReadingLanguage; feedPage: number; page: number; offset: number; completed?: boolean };
 export const POSITION_KEY = "ark-library:reader:v1:";
 export const READER_SETTINGS_KEY = "ark-library:reader-settings:v1";
@@ -39,7 +39,8 @@ export function readReaderPreferences(storage: Pick<Storage, "getItem"> = localS
   try { value = JSON.parse(storage.getItem(READER_SETTINGS_KEY) || "{}") || {}; oldWidth = Number(storage.getItem("ark-library:reader-width:v1")) || 780; } catch { /* use defaults */ }
   const width = Number(value.width ?? oldWidth);
   return { mode: value.mode === "paged" ? "paged" : "vertical", quality: value.quality === "compressed" ? "compressed" : "original",
-    size: value.size === "native" ? "native" : "fit", width: width >= 420 && width <= 1100 ? width : 780 };
+    size: value.size === "native" ? "native" : value.size === "screen" ? "screen" : "fit", width: width >= 420 && width <= 1100 ? width : 780,
+    ...(value.controlsHidden === true ? { controlsHidden: true } : {}) };
 }
 export function chapterIndex(chapters: Chapter[], current: Chapter | null) {
   if (!current) return -1;

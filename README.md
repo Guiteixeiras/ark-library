@@ -104,3 +104,11 @@ O aplicativo precisa acessar `api.mangadex.org`, `uploads.mangadex.org` e os ser
 ## Créditos e condições
 
 Dados e capas por [MangaDex](https://mangadex.org). As imagens de leitura são fornecidas pelo MangaDex@Home, e os grupos responsáveis são indicados na lista e no leitor. Respeite a [política de uso da API](https://api.mangadex.org/docs/), incluindo créditos, pedidos de remoção e restrições a anúncios e serviços pagos. API e disponibilidade de traduções podem mudar.
+
+### Conforto na leitura
+
+O leitor ocupa a janela inteira e esconde a navegação da biblioteca. Recolha a barra pelo botão ou pela tecla **H**; o botão **Controles** permite abri-la novamente. **F** ativa tela cheia e recolhe os controles. Em **Imagem → Ocupar a tela**, páginas maiores aproveitam a largura disponível, preservando a proporção e sem ampliar arquivos menores além da resolução original. A qualidade **Original** mantém o arquivo enviado pela tradução.
+
+A capa e o título dos capítulos recentes abrem os detalhes da obra; **Ler no ARK** continua abrindo o capítulo diretamente. Dentro do leitor, **Ver obra** leva aos capítulos, favoritos e status da coleção, incluindo **Pausado**. Retomar a leitura muda o status para **Lendo**.
+
+A IA hospedada precisa de uma conexão acessível pelo servidor: o Render não alcança o Ollama instalado no PC por `localhost`. A interface explica essa situação. Para usar o modelo local atual, execute ARK e Ollama no mesmo PC; nenhuma integração com uma IA externa foi configurada nesta atualização.

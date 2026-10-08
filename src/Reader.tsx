@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { CheckCheck, ChevronLeft, ChevronRight, ExternalLink, LoaderCircle, Maximize, Minimize, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import { BookOpen, CheckCheck, ChevronLeft, ChevronRight, ExternalLink, LoaderCircle, Maximize, Minimize, PanelTopClose, PanelTopOpen, X } from "lucide-react";
 import { canonicalChapter, chapterIndex, languageLabel, POSITION_KEY, readPosition, readReaderPreferences, READER_SETTINGS_KEY } from "./reading";
 import type { ReaderPreferences } from "./reading";
 import type { Chapter, Manga } from "./types";
@@ -20,11 +21,12 @@ function PageImage({ url, index, eager, onReady }: {
   </figure>;
 }
 
-export default function Reader({ manga, chapter, chapters, feedPage, feedLanguage, canPrevious, canNext, navigating, navigationError, onNavigate, onSelect, onClose, onComplete, onRead }: {
+export default function Reader({ manga, chapter, chapters, feedPage, feedLanguage, canPrevious, canNext, navigating, navigationError, onNavigate, onSelect, onClose, onComplete, onRead, onDetails }: {
   manga: Manga; chapter: Chapter; chapters: Chapter[]; feedPage: number; feedLanguage: string;
   canPrevious: boolean; canNext: boolean; navigating: boolean; navigationError: string;
   onNavigate: (direction: -1 | 1) => void; onSelect: (chapter: Chapter) => void;
   onClose: () => void; onComplete: (chapter: Chapter) => boolean; onRead: (chapter: Chapter) => void;
+  onDetails: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
@@ -36,6 +38,8 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
   const ready = useRef(new Map<number, boolean>());
   const visited = useRef(new Set<number>());
   const recorded = useRef(new Set<string>());
+  const showControlsButton = useRef<HTMLButtonElement>(null);
+  const hideControlsButton = useRef<HTMLButtonElement>(null);
   const [active, setActive] = useState(chapter);
   const [prefs, setPrefs] = useState(readReaderPreferences);
   const [currentPage, setCurrentPage] = useState(saved?.page || 0);
@@ -72,13 +76,14 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
   }
   const persistRef = useRef(persist); persistRef.current = persist;
   useEffect(() => {
+    document.documentElement.dataset.readerOpen = "true";
     dialog.current?.showModal();
     const timer = setInterval(() => persistRef.current(), 800);
     const flush = () => persistRef.current();
     const onFullscreen = () => setFullscreen(!!document.fullscreenElement);
     window.addEventListener("pagehide", flush);
     document.addEventListener("fullscreenchange", onFullscreen);
-    return () => { clearInterval(timer); flush(); window.removeEventListener("pagehide", flush); document.removeEventListener("fullscreenchange", onFullscreen); };
+    return () => { delete document.documentElement.dataset.readerOpen; clearInterval(timer); flush(); window.removeEventListener("pagehide", flush); document.removeEventListener("fullscreenchange", onFullscreen); };
   }, []);
 
   useEffect(() => {
@@ -123,7 +128,7 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
       else if (prefs.mode === "paged") scroll.current?.scrollTo({ top: 0 });
     });
     return () => cancelAnimationFrame(frame);
-  }, [pages, prefs.mode, prefs.width, prefs.size, prefs.mode === "paged" ? currentPage : -1]);
+  }, [pages, prefs.mode, prefs.width, prefs.size, prefs.controlsHidden, fullscreen, prefs.mode === "paged" ? currentPage : -1]);
 
   function markComplete() {
     if (completed.current || active.number === null) return;
@@ -170,13 +175,23 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
   async function toggleFullscreen() {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
-      else { await document.documentElement.requestFullscreen(); ownsFullscreen.current = true; }
+      else { await document.documentElement.requestFullscreen(); ownsFullscreen.current = true; changePreferences({ controlsHidden: true }); }
     } catch { setNotice("A tela cheia não está disponível neste navegador."); }
   }
   function close() {
     persist();
     if (document.fullscreenElement && ownsFullscreen.current) void document.exitFullscreen().catch(() => {});
     onClose();
+  }
+  function showDetails() {
+    persist();
+    if (document.fullscreenElement && ownsFullscreen.current) void document.exitFullscreen().catch(() => {});
+    onDetails();
+  }
+  function toggleControls() {
+    const hidden = !prefs.controlsHidden;
+    changePreferences({ controlsHidden: hidden });
+    requestAnimationFrame(() => (hidden ? showControlsButton.current : hideControlsButton.current)?.focus({ preventScroll: true }));
   }
   useEffect(() => {
     const keydown = (e: KeyboardEvent) => {
@@ -186,6 +201,7 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
         e.preventDefault(); goPage(e.key === "Home" ? 0 : e.key === "End" ? pages.length - 1 : currentPage + (e.key === "ArrowRight" ? 1 : -1));
       } else if (e.key.toLowerCase() === "f") { e.preventDefault(); void toggleFullscreen(); }
       else if (e.key.toLowerCase() === "m") { e.preventDefault(); changePreferences({ mode: prefs.mode === "vertical" ? "paged" : "vertical" }); }
+      else if (e.key.toLowerCase() === "h") { e.preventDefault(); toggleControls(); }
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
@@ -193,10 +209,12 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
 
   const selectedIndex = chapterIndex(chapters, chapter);
   const atLast = prefs.mode === "vertical" || currentPage === pages.length - 1;
-  return <dialog ref={dialog} className="reader-dialog" aria-labelledby="reader-title" onCancel={e => { e.preventDefault(); close(); }}>
-    <header className="reader-toolbar">
+  return createPortal(<dialog ref={dialog} className="reader-dialog" aria-labelledby="reader-title" onCancel={e => { e.preventDefault(); close(); }}>
+    <header id="reader-toolbar" className="reader-toolbar" hidden={!!prefs.controlsHidden}>
       <div className="reader-heading"><span>ARK · SUA LEITURA</span><h2 id="reader-title">{manga.title}</h2>
         <small>Cap. {active.number ?? "especial"} · Tradução: {active.group} · {languageLabel(active.language)}</small></div>
+      <button className="secondary-button reader-work-button" onClick={showDetails}><BookOpen size={16} /> Ver obra</button>
+      <button ref={hideControlsButton} className="icon-button" aria-label="Recolher controles" title="Recolher controles (H)" aria-controls="reader-toolbar" aria-expanded="true" onClick={toggleControls}><PanelTopClose size={20} /></button>
       <button className="icon-button" aria-label={fullscreen ? "Sair da tela cheia" : "Tela cheia"} title="Tela cheia (F)" onClick={() => void toggleFullscreen()}>
         {fullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
       </button>
@@ -213,17 +231,19 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
       <div className="reader-settings">
         <label>Leitura<select aria-label="Modo de leitura" value={prefs.mode} onChange={e => changePreferences({ mode: e.target.value as ReaderPreferences["mode"] })}><option value="vertical">Vertical</option><option value="paged">Página por página</option></select></label>
         <label>Qualidade<select aria-label="Qualidade das imagens" value={prefs.quality} onChange={e => changePreferences({ quality: e.target.value as ReaderPreferences["quality"] })}><option value="original">Original · máxima qualidade</option><option value="compressed">Econômica · menos dados</option></select></label>
-        <label>Imagem<select aria-label="Tamanho das imagens" value={prefs.size} onChange={e => changePreferences({ size: e.target.value as ReaderPreferences["size"] })}><option value="fit">Ajustar à largura</option><option value="native">Tamanho real</option></select></label>
-        <label className="reader-width">Largura<input aria-label="Largura da leitura" type="range" min="420" max="1100" step="20" value={prefs.width} disabled={prefs.size === "native"} onChange={e => changePreferences({ width: Number(e.target.value) })} /></label>
+        <label>Imagem<select aria-label="Tamanho das imagens" value={prefs.size} onChange={e => changePreferences({ size: e.target.value as ReaderPreferences["size"] })}><option value="fit">Largura personalizada</option><option value="screen">Ocupar a tela</option><option value="native">Tamanho real</option></select></label>
+        <label className="reader-width">Largura<input aria-label="Largura da leitura" type="range" min="420" max="1100" step="20" value={prefs.width} disabled={prefs.size !== "fit"} onChange={e => changePreferences({ width: Number(e.target.value) })} /></label>
       </div>
       <div className="reader-page-controls">
         {prefs.mode === "paged" && <button className="icon-button" aria-label="Página anterior do capítulo" disabled={currentPage === 0 || !pages.length} onClick={() => goPage(currentPage - 1)}><ChevronLeft size={18} /></button>}
         <span aria-live="polite">{pages.length ? `Página ${currentPage + 1} de ${pages.length}` : "Carregando páginas"}</span>
         {prefs.mode === "paged" && <button className="icon-button" aria-label="Próxima página do capítulo" disabled={currentPage === pages.length - 1 || !pages.length} onClick={() => goPage(currentPage + 1)}><ChevronRight size={18} /></button>}
         {dimensions && <small>{dimensions} px · {prefs.quality === "original" ? "Original" : "Econômica"}</small>}
-        <details className="reader-shortcuts"><summary>Atalhos</summary><p>F: tela cheia · M: modo de leitura · ← e →: páginas no modo paginado.</p></details>
+        <details className="reader-shortcuts"><summary>Atalhos</summary><p>F: tela cheia · H: mostrar/recolher controles · M: modo de leitura · ← e →: páginas no modo paginado.</p></details>
       </div>
     </header>
+    {prefs.controlsHidden && <button ref={showControlsButton} className="reader-controls-handle" aria-label="Mostrar controles" aria-controls="reader-toolbar" aria-expanded="false" title="Mostrar controles (H)" onClick={toggleControls}><PanelTopOpen size={17} /> Controles</button>}
+    {prefs.controlsHidden && (navigationError || notice) && <p className="reader-floating-notice" role="status">{navigationError || notice}</p>}
     <div ref={scroll} className="reader-scroll" onScroll={() => {
       if (!restoring.current && prefs.mode === "vertical") setCurrentPage(visiblePosition().page);
       maybeComplete();
@@ -231,7 +251,7 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
       tabIndex={0} aria-label="Páginas do capítulo">
       {notice && <p className="reader-notice" role="status">{notice}</p>}
       {error ? <div className="reader-message" role="alert"><p>{error}</p><button className="primary-button" onClick={() => setRetry(retry + 1)}>Tentar novamente</button></div> : !pages.length ? <p className="reader-message"><LoaderCircle className="spin" size={22} /> Carregando capítulo…</p> : <>
-        <div className={`reader-pages ${prefs.size === "native" ? "native-size" : ""}`} style={{ maxWidth: prefs.width }}>
+        <div className={`reader-pages ${prefs.size === "native" ? "native-size" : prefs.size === "screen" ? "screen-size" : ""}`} style={{ maxWidth: prefs.size === "fit" ? prefs.width : undefined }}>
           {pages.map((url, i) => (prefs.mode === "vertical" || i === currentPage) && <PageImage key={`${retry}:${url}`} url={url} index={i}
             eager={prefs.mode === "paged" || i === 0 || i <= (anchor.current?.page ?? -1)} onReady={pageReady} />)}
         </div>
@@ -241,8 +261,9 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
           <button className="primary-button" onClick={markComplete} disabled={done || active.number === null}><CheckCheck size={17} /> {done ? "Progresso salvo" : "Marcar como lido"}</button>
           {canNext && <button className="secondary-button" disabled={navigating} onClick={() => { persist(); onNavigate(1); }}>Próximo capítulo <ChevronRight size={16} /></button>}
           <a className="text-link" href={active.url} target="_blank" rel="noopener noreferrer">Fonte e créditos no MangaDex <ExternalLink size={14} /></a>
+          <button className="text-link" onClick={showDetails}><BookOpen size={15} /> Ver obra e capítulos</button>
         </div>}
       </>}
     </div>
-  </dialog>;
+  </dialog>, document.body);
 }

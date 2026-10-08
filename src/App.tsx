@@ -50,6 +50,7 @@ const statusLabels: Record<ReadingStatus, string> = {
   planned: "Quero ler",
   reading: "Lendo",
   completed: "Concluído",
+  paused: "Pausado",
 };
 const publication: Record<string, string> = {
   ongoing: "Em publicação",
@@ -184,6 +185,7 @@ function Details({
   const [reading, setReading] = useState<Chapter | null>(null);
   const [readingPage, setReadingPage] = useState(1);
   const pendingNavigation = useRef<-1 | 1 | null>(null);
+  const returnToDetails = useRef(!(startReading || requestedChapter));
   const resume = readPosition(manga.id);
   const [chapterLanguage, setChapterLanguage] = useState(
     requestedChapter ? (requestedChapter.language === "en" ? "en" : "pt-br") : initialPosition.current?.feedLanguage || (preferredLanguage === "en" ? "en" : "pt-br"),
@@ -466,7 +468,8 @@ function Details({
     </dialog>
     {reading && <Reader key={reading.id} manga={manga} chapter={reading} chapters={chapters}
       feedPage={readingPage} feedLanguage={chapterLanguage} canPrevious={canPrevious} canNext={canNext} navigating={loading} navigationError={navigationError}
-      onNavigate={navigateChapter} onSelect={openChapter} onClose={() => { pendingNavigation.current = null; setReading(null); if (startReading || requestedChapter) onClose(); }}
+      onNavigate={navigateChapter} onSelect={openChapter} onClose={() => { pendingNavigation.current = null; setReading(null); if (!returnToDetails.current) onClose(); }}
+      onDetails={() => { returnToDetails.current = true; pendingNavigation.current = null; setReading(null); }}
       onRead={chapter => onHistory(chapter)}
       onComplete={active => {
         if (!active.number || !/^\d+(?:\.\d+)?$/.test(active.number)) return false;
@@ -1087,7 +1090,7 @@ export default function App() {
               )}
             </>
           )}
-          {view === 'discover' && <Releases language={readingLanguage} collection={collection} personal={personal} onRead={(manga, chapter) => openDetails(manga, true, chapter)} />}
+          {view === 'discover' && <Releases language={readingLanguage} collection={collection} personal={personal} onRead={(manga, chapter) => openDetails(manga, true, chapter)} onOpen={manga => openDetails(manga)} />}
           {view === "discover" && <Recommendations collection={collection} language={readingLanguage} renderCard={manga => <MangaCard manga={manga} saved={collection[manga.id]} onOpen={() => openDetails(manga)} onSave={() => collection[manga.id] ? remove(manga.id) : update(manga)} />} />}
           {view !== 'history' && <>
           <section className="catalog-section" ref={catalog}>
@@ -1186,6 +1189,7 @@ export default function App() {
                       ["reading", "Lendo"],
                       ["planned", "Quero ler"],
                       ["completed", "Concluídos"],
+                      ["paused", "Pausados"],
                     ]
                 ).map(([value, label]) => (
                   <button
