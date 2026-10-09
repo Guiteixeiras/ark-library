@@ -1,7 +1,7 @@
 import { cleanItem, createBackup, MAX_BACKUP_BYTES, mergeCollections, newItem, parseBackup, STORAGE_KEY, validItem } from './library.ts';
-import { canonicalChapter, LANGUAGE_KEY, POSITION_KEY, readPosition, readReaderPreferences, READER_SETTINGS_KEY } from './reading.ts';
+import { canonicalChapter, LANGUAGE_KEY, POSITION_KEY, readPosition, readReaderPreferences, READER_SETTINGS_KEY, readWorkSettings, validateWorkSettings, WORK_SETTINGS_KEY } from './reading.ts';
 import { readDismissed, UPDATES_KEY } from './updates.ts';
-import type { Position, ReaderPreferences, ReadingLanguage } from './reading.ts';
+import type { Position, ReaderPreferences, ReadingLanguage, WorkReaderSettings } from './reading.ts';
 import type { Chapter, Collection, Manga } from './types';
 
 export const PERSONAL_KEY = 'ark-library:personal:v1';
@@ -9,7 +9,7 @@ const UUID = /^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i;
 export type ReadingList = { id: string; name: string; mangaIds: string[]; updatedAt: number };
 export type HistoryEntry = { manga: Manga; chapter: Chapter; readAt: number; completed: boolean };
 export type Personal = { lists: ReadingList[]; history: HistoryEntry[] };
-export type WorkspaceBackup = { version: 1; personal: Personal; positions: Record<string, Position>; settings: ReaderPreferences;
+export type WorkspaceBackup = { version: 1; personal: Personal; positions: Record<string, Position>; settings: ReaderPreferences; workSettings?: WorkReaderSettings;
   language: ReadingLanguage; theme: 'light' | 'dark'; dismissed: Record<string, number> };
 export type FullBackup = { collection: Collection; workspace?: WorkspaceBackup };
 const empty = (): Personal => ({ lists: [], history: [] });
@@ -68,7 +68,8 @@ export function mergePersonal(current: Personal, incoming: Personal): Personal {
 }
 export function createFullBackup(collection: Collection, personal: Personal, storage: Pick<Storage, 'getItem'> = localStorage, theme?: 'light' | 'dark') {
   const positions = Object.fromEntries(Object.keys(collection).flatMap(id => { const position = readPosition(id, storage); return position ? [[id, position]] : []; }));
-  const workspace: WorkspaceBackup = { version: 1, personal, positions, settings: readReaderPreferences(storage),
+  const workSettings = Object.fromEntries(Object.entries(readWorkSettings(storage)).filter(([id]) => !!collection[id]));
+  const workspace: WorkspaceBackup = { version: 1, personal, positions, settings: readReaderPreferences(storage), workSettings,
     language: storage.getItem(LANGUAGE_KEY) === 'en' ? 'en' : 'pt-br', theme: theme || (storage.getItem('ark-library:theme:v1') === 'dark' ? 'dark' : 'light'), dismissed: readDismissed(storage) };
   const result = JSON.stringify({ ...JSON.parse(createBackup(collection)), workspace: { ...workspace,
     ...(workspace.settings.size === 'screen' ? { settings: { ...workspace.settings, size: 'fit' }, screenFit: true } : {}) } }, null, 2);
@@ -92,10 +93,12 @@ export function parseFullBackup(contents: string): FullBackup {
       !finite(s.width) || s.width < 420 || s.width > 1100 || (s.controlsHidden !== undefined && typeof s.controlsHidden !== 'boolean') ||
       (workspace.screenFit !== undefined && typeof workspace.screenFit !== 'boolean')) throw new Error('Preferências do leitor inválidas.');
   const dismissed = readDismissed({ getItem: () => JSON.stringify(workspace.dismissed) });
+  const workSettings = workspace.workSettings === undefined ? undefined : validateWorkSettings(workspace.workSettings);
+  if (workSettings && Object.keys(workSettings).some(id => !collection[id])) throw new Error('Ajustes de uma obra ausente no backup.');
   if (!workspace.dismissed || typeof workspace.dismissed !== 'object' || Array.isArray(workspace.dismissed) ||
       Object.keys(dismissed).length !== Object.keys(workspace.dismissed).length) throw new Error('Avisos do backup inválidos.');
   return { collection, workspace: { version: 1, personal: validatePersonal(workspace.personal), positions, settings: { ...s, ...(workspace.screenFit ? { size: 'screen' } : {}) },
-    language: workspace.language, theme: workspace.theme, dismissed } };
+    language: workspace.language, theme: workspace.theme, dismissed, ...(workSettings ? { workSettings } : {}) } };
 }
 // Stage every write and restore originals on failure; collection is committed last.
 export function restoreFullBackup(current: Collection, personal: Personal, incoming: FullBackup, storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> = localStorage) {
@@ -106,6 +109,11 @@ export function restoreFullBackup(current: Collection, personal: Personal, incom
   if (w) {
     writes.push([PERSONAL_KEY, JSON.stringify(nextPersonal)], [READER_SETTINGS_KEY, JSON.stringify(w.settings)],
       [LANGUAGE_KEY, w.language], ['ark-library:theme:v1', w.theme]);
+    if (w.workSettings) {
+      const workSettings = readWorkSettings(storage);
+      for (const [id, entry] of Object.entries(w.workSettings)) if (!workSettings[id] || entry.updatedAt > workSettings[id].updatedAt) workSettings[id] = entry;
+      writes.push([WORK_SETTINGS_KEY, JSON.stringify(Object.fromEntries(Object.entries(workSettings).filter(([id]) => !!collection[id]).sort((a, b) => b[1].updatedAt - a[1].updatedAt).slice(0, 5000)))]);
+    }
     const dismissed = readDismissed(storage);
     for (const [key, n] of Object.entries(w.dismissed)) dismissed[key] = Math.max(dismissed[key] ?? -1, n);
     writes.push([UPDATES_KEY, JSON.stringify(dismissed)]);

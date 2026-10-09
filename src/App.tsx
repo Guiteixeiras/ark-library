@@ -190,6 +190,35 @@ function Details({
   const [chapterLanguage, setChapterLanguage] = useState(
     requestedChapter ? (requestedChapter.language === "en" ? "en" : "pt-br") : initialPosition.current?.feedLanguage || (preferredLanguage === "en" ? "en" : "pt-br"),
   );
+  const [listItems, setListItems] = useState<(Chapter & { isRead: boolean })[]>([]);
+  const [listLoading, setListLoading] = useState(true);
+  const [listError, setListError] = useState('');
+  const [listRetry, setListRetry] = useState(0);
+  const [listPage, setListPage] = useState(1);
+  const [listQuery, setListQuery] = useState('');
+  const [appliedQuery, setAppliedQuery] = useState('');
+  const [listOrder, setListOrder] = useState<'asc' | 'desc'>('desc');
+  const [listFilter, setListFilter] = useState<'all' | 'read' | 'unread'>('all');
+  const [listInfo, setListInfo] = useState({ total: 0, availableTotal: 0, readTotal: 0, truncated: false });
+  const completedIds = JSON.stringify(personal.history.filter(h => h.manga.id === manga.id && h.completed &&
+    (h.chapter.language === 'en') === (chapterLanguage === 'en')).map(h => h.chapter.id).sort());
+  useEffect(() => {
+    const timer = setTimeout(() => setAppliedQuery(listQuery.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [listQuery]);
+  useEffect(() => {
+    if (reading) return;
+    const controller = new AbortController();
+    setListLoading(true); setListError('');
+    fetch(`/api/manga/${manga.id}/chapter-list`, { method: 'POST', signal: controller.signal,
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ language: chapterLanguage, page: listPage,
+        query: appliedQuery, order: listOrder, filter: listFilter, through: item?.chapter || '', completed: JSON.parse(completedIds) }) })
+      .then(async r => { const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Não foi possível buscar os capítulos.'); return data; })
+      .then(data => { if (controller.signal.aborted) return; setListItems(data.items); setListInfo(data); if (data.page !== listPage) setListPage(data.page); })
+      .catch(e => { if (e.name !== 'AbortError') setListError(e.message); })
+      .finally(() => { if (!controller.signal.aborted) setListLoading(false); });
+    return () => controller.abort();
+  }, [manga.id, chapterLanguage, listPage, appliedQuery, listOrder, listFilter, item?.chapter, completedIds, !!reading, listRetry]);
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
@@ -258,6 +287,13 @@ function Details({
       pendingNavigation.current = direction;
       setChapterPage(chapterPage + direction);
     }
+  }
+  function openListedChapter(c: Chapter) {
+    desiredChapter.current = c;
+    locator.current = { chapterId: c.id, ...(c.number !== null ? { chapterNumber: c.number } : {}) };
+    pendingStart.current = true;
+    setNavigationError('');
+    setFetchTick(tick => tick + 1);
   }
   return (
     <>
@@ -389,7 +425,7 @@ function Details({
             <select
               aria-label="Idioma da leitura"
               value={chapterLanguage}
-              onChange={(e) => { setChapterLanguage(e.target.value === "en" ? "en" : "pt-br"); setChapterPage(1); }}
+              onChange={(e) => { setChapterLanguage(e.target.value === "en" ? "en" : "pt-br"); setChapterPage(1); setListPage(1); }}
             >
               {LANGUAGES.map(([value, label]) => (
                 <option key={value} value={value}>
@@ -398,6 +434,12 @@ function Details({
               ))}
             </select>
           </label>
+          <div className="chapter-browser-controls">
+            <label>Buscar capítulo<input type="search" aria-label="Buscar capítulo" placeholder="Número ou título · ex.: 12,5" maxLength={120} value={listQuery} onChange={e => { setListQuery(e.target.value); setListPage(1); }} /></label>
+            <label>Ordem<select aria-label="Ordem dos capítulos" value={listOrder} onChange={e => { setListOrder(e.target.value as 'asc' | 'desc'); setListPage(1); }}><option value="desc">Do último ao primeiro</option><option value="asc">Do primeiro ao último</option></select></label>
+            <label>Mostrar<select aria-label="Filtrar capítulos" value={listFilter} onChange={e => { setListFilter(e.target.value as 'all' | 'read' | 'unread'); setListPage(1); }}><option value="all">Todos</option><option value="unread">Não lidos</option><option value="read">Lidos</option></select></label>
+          </div>
+          {!listLoading && !listError && <p className="chapter-summary" role="status">{listInfo.total} {listInfo.total === 1 ? 'capítulo encontrado' : 'capítulos encontrados'} · {listInfo.readTotal} lidos de {listInfo.availableTotal} disponíveis.{item?.chapter ? ` Seu progresso inclui os capítulos até ${item.chapter}.` : ''}</p>}
           {resume && <button className="primary-button resume-button" onClick={() => {
             setChapterLanguage(resume.feedLanguage);
             setChapterPage(resume.feedPage);
@@ -406,33 +448,30 @@ function Details({
             pendingStart.current = true;
             setFetchTick(fetchTick + 1);
           }}>Retomar leitura · Cap. {resume.chapter.number || "especial"}</button>}
-          {loading ? (
+          {listLoading ? (
             <p className="muted loading-inline">
               <LoaderCircle className="spin" size={16} /> Buscando capítulos…
             </p>
-          ) : error ? (
-            <p role="alert" className="error-copy">
-              {error}
-            </p>
-          ) : chapters.length ? (
+          ) : listError ? (
+            <div><p role="alert" className="error-copy">{listError}</p><button className="secondary-button" onClick={() => setListRetry(tick => tick + 1)}>Tentar novamente</button></div>
+          ) : listItems.length ? (
             <ul className="chapter-list">
-              {chapters.map((c) => (
-                <li key={c.id}>
-                  <button className="chapter-open" onClick={() => openChapter(c)} aria-label={`Ler capítulo ${c.number || "especial"} no ARK`}>
+              {listItems.map((c) => (
+                <li key={c.id} className={c.isRead ? 'chapter-read' : 'chapter-unread'}>
+                  <button className="chapter-open" disabled={loading} onClick={() => openListedChapter(c)} aria-label={`Ler capítulo ${c.number || "especial"} no ARK`}>
                     <span>
                       Cap. {c.number || "especial"} {c.title && `— ${c.title}`}
                     </span>
-                    <small>{c.group}</small>
+                    <small><span className="chapter-read-badge">{c.isRead ? 'Lido' : 'Não lido'}</span> {c.group}</small>
                   </button>
                   <button
                     className="icon-button"
-                    aria-label={`Marcar capítulo ${c.number || "especial"} como lido`}
-                    disabled={!c.number}
+                    aria-label={`Marcar até o capítulo ${c.number || "especial"} como lido`}
+                    disabled={c.isRead || !c.number || !/^\d+(?:\.\d+)?$/.test(c.number)}
                     onClick={() => {
                       if (c.number) {
-                        setChapter(c.number);
-                        onUpdate({ chapter: c.number, status: "reading" });
-                        setNotice(`Progresso salvo: capítulo ${c.number}.`);
+                        const next = Number(item?.chapter || 0) > Number(c.number) ? item!.chapter : c.number;
+                        if (onUpdate({ chapter: next, status: "reading" })) { setChapter(next); setNotice(`Progresso salvo até o capítulo ${next}.`); }
                       }
                     }}
                   >
@@ -443,14 +482,16 @@ function Details({
             </ul>
           ) : (
             <p className="muted">
-              Nenhum capítulo disponível nesse idioma para esta obra.
+              {listInfo.availableTotal ? 'Nenhum capítulo corresponde à busca e aos filtros.' : 'Nenhum capítulo disponível nesse idioma para esta obra.'}
             </p>
           )}
-          {chapterTotal > 40 && <div className="pagination-controls chapter-pagination">
-            <button className="secondary-button" disabled={loading || chapterPage === 1} onClick={() => setChapterPage(chapterPage - 1)}>Capítulos anteriores</button>
-            <span>Página {chapterPage} de {Math.ceil(Math.min(chapterTotal, 10000) / 40)}</span>
-            <button className="secondary-button" disabled={loading || chapterPage * 40 >= Math.min(chapterTotal, 10000)} onClick={() => setChapterPage(chapterPage + 1)}>Mais capítulos</button>
+          {listInfo.total > 40 && <div className="pagination-controls chapter-pagination">
+            <button className="secondary-button" disabled={listLoading || listPage === 1} onClick={() => setListPage(listPage - 1)}>Página anterior</button>
+            <span>Página {listPage} de {Math.ceil(listInfo.total / 40)}</span>
+            <button className="secondary-button" disabled={listLoading || listPage * 40 >= listInfo.total} onClick={() => setListPage(listPage + 1)}>Próxima página</button>
           </div>}
+          {listInfo.truncated && <p className="chapter-summary">Esta obra excede o limite de consulta de 10.000 versões do MangaDex. Alguns capítulos podem não aparecer.</p>}
+          {error && <p role="alert" className="error-copy">{error}</p>}
           <a
             className="text-link"
             href={manga.url}

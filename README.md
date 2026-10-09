@@ -112,3 +112,11 @@ O leitor ocupa a janela inteira e esconde a navegação da biblioteca. Recolha a
 A capa e o título dos capítulos recentes abrem os detalhes da obra; **Ler no ARK** continua abrindo o capítulo diretamente. Dentro do leitor, **Ver obra** leva aos capítulos, favoritos e status da coleção, incluindo **Pausado**. Retomar a leitura muda o status para **Lendo**.
 
 A IA hospedada precisa de uma conexão acessível pelo servidor: o Render não alcança o Ollama instalado no PC por `localhost`. A interface explica essa situação. Para usar o modelo local atual, execute ARK e Ollama no mesmo PC; nenhuma integração com uma IA externa foi configurada nesta atualização.
+
+### Capítulos e ajustes por obra
+
+Nos detalhes da obra, busque pelo número exato do capítulo (incluindo `12,5` ou `12.5`) ou pelo título, filtre **Todos**, **Lidos** e **Não lidos** e escolha a ordem do primeiro ao último ou do último ao primeiro. A busca e os filtros consultam a lista completa disponível antes da paginação. A navegação no leitor mantém a sequência de leitura independentemente desses filtros.
+
+**Marcar até o capítulo como lido** atualiza o progresso até aquele número. A indicação de lido considera esse progresso e os capítulos concluídos no histórico, incluindo traduções alternativas. Apenas abrir um capítulo não o marca como concluído. O progresso numérico existente é compartilhado entre os idiomas; o histórico de conclusão considera o idioma consultado. Capítulos sem número dependem da conclusão registrada no histórico. A lista informa quando a consulta oficial de 10.000 versões foi limitada.
+
+Modo de leitura, qualidade, largura, tamanho da imagem e controles recolhidos são lembrados para cada obra. Obras sem ajustes próprios usam as preferências anteriores como padrão. Os ajustes usam `ark-library:reader-work-settings:v1`, com até 5.000 obras, e acompanham o backup completo na extensão opcional `workspace.workSettings`. Backups antigos continuam aceitos; ao combinar backups, os ajustes locais mais recentes são preservados. Essa extensão é ignorada por versões anteriores do ARK.

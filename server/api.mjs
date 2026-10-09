@@ -1,6 +1,7 @@
 import { arkApi } from "./ark.mjs";
 import { groupChapters, chapterSlice } from "./chapters.mjs";
 import { featuredManga, featuredSlice, releaseFeed } from "./discovery.mjs";
+import { chapterListOptions, chapterListSlice } from '../src/chapter-browser.ts';
 const API = "https://api.mangadex.org";
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/avif"]);
 const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
@@ -160,6 +161,28 @@ export async function apiMiddleware(req, res, next) {
   const url = new URL(req.url || "/", "http://localhost");
   if (!url.pathname.startsWith("/api/")) return next();
   if (url.pathname.startsWith("/api/ark/")) return arkApi(req, res, url, { upstream, mapManga: manga }).catch(() => reply(res, 502, { error: "Não foi possível consultar as sugestões agora. Tente novamente." }));
+  const listRoute = url.pathname.match(/^\/api\/manga\/([^/]+)\/chapter-list$/);
+  if (listRoute) {
+    if (req.method !== 'POST') return reply(res, 405, { error: 'Método não permitido.' });
+    if (!UUID.test(listRoute[1])) return reply(res, 400, { error: 'Obra inválida.' });
+    let options;
+    try {
+      if ((req.headers?.['content-type'] || '').split(';')[0].trim().toLowerCase() !== 'application/json') throw new Error('Use JSON para os filtros de capítulos.');
+      let size = 0; const chunks = [];
+      for await (const chunk of req.iterator({ destroyOnReturn: false })) {
+        size += Buffer.byteLength(chunk);
+        if (size > 32768) { req.resume(); return reply(res, 413, { error: 'Filtros de capítulos muito grandes.' }); }
+        chunks.push(Buffer.from(chunk));
+      }
+      options = chapterListOptions(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+    } catch { return reply(res, 400, { error: 'Filtros de capítulos inválidos.' }); }
+    try {
+      const data = await chapterIndex(listRoute[1], options.language);
+      return reply(res, 200, { ...chapterListSlice(data.items, options), truncated: data.truncated });
+    } catch (error) {
+      return reply(res, error.status || 502, { error: error.status ? error.message : 'Não foi possível buscar os capítulos. Tente novamente.' });
+    }
+  }
   if (req.method !== "GET")
     return reply(res, 405, { error: "Método não permitido." });
   try {

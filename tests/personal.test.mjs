@@ -69,3 +69,28 @@ test('screen-sized reading and collapsed controls round-trip with legacy-compati
   const invalid = JSON.parse(backup); invalid.workspace.settings.controlsHidden = 'yes';
   assert.throws(() => parseFullBackup(JSON.stringify(invalid)), /leitor/);
 });
+
+test('per-work reader settings survive backups and newer local settings win during restore', async () => {
+  const { WORK_SETTINGS_KEY } = await import('../src/reading.ts');
+  const settings = { mode: 'paged', quality: 'original', size: 'screen', width: 980, controlsHidden: true };
+  const incoming = parseFullBackup(createFullBackup(collection, personal, memory({ [WORK_SETTINGS_KEY]: JSON.stringify({ [id]: { settings, updatedAt: 100 } }) })));
+  assert.deepEqual(incoming.workspace.workSettings[id].settings, settings);
+  const local = { [id]: { settings: { ...settings, mode: 'vertical' }, updatedAt: 200 } };
+  const storage = memory({ [WORK_SETTINGS_KEY]: JSON.stringify(local) });
+  restoreFullBackup(collection, personal, incoming, storage);
+  assert.deepEqual(JSON.parse(storage.getItem(WORK_SETTINGS_KEY)), local);
+  const invalid = JSON.parse(createFullBackup(collection, personal, memory())); invalid.workspace.workSettings[id] = { settings: { ...settings, width: 0 }, updatedAt: 100 };
+  assert.throws(() => parseFullBackup(JSON.stringify(invalid)), /Ajustes/);
+});
+
+test('backup restore rolls back per-work settings if saving the collection fails', async () => {
+  const { WORK_SETTINGS_KEY } = await import('../src/reading.ts');
+  const settings = { mode: 'vertical', quality: 'original', size: 'screen', width: 980 };
+  const original = { [STORAGE_KEY]: JSON.stringify(collection), [WORK_SETTINGS_KEY]: JSON.stringify({ [id]: { settings: { ...settings, size: 'fit' }, updatedAt: 50 } }), [LANGUAGE_KEY]: 'en' };
+  const storage = memory(original);
+  const incoming = parseFullBackup(createFullBackup(collection, personal, memory({ [WORK_SETTINGS_KEY]: JSON.stringify({ [id]: { settings, updatedAt: 100 } }) })));
+  const setter = storage.setItem; let failed = false;
+  storage.setItem = (key, value) => { if (key === STORAGE_KEY && !failed) { failed = true; throw Error('quota'); } setter(key, value); };
+  assert.throws(() => restoreFullBackup(collection, personal, incoming, storage), /restaurar/);
+  assert.deepEqual(Object.fromEntries(storage.values), original);
+});

@@ -6,6 +6,8 @@ export type ReaderPreferences = { mode: ReaderMode; quality: ImageQuality; size:
 export type Position = { chapter: Chapter; feedLanguage: ReadingLanguage; feedPage: number; page: number; offset: number; completed?: boolean };
 export const POSITION_KEY = "ark-library:reader:v1:";
 export const READER_SETTINGS_KEY = "ark-library:reader-settings:v1";
+export const WORK_SETTINGS_KEY = "ark-library:reader-work-settings:v1";
+export type WorkReaderSettings = Record<string, { settings: ReaderPreferences; updatedAt: number }>;
 export const LANGUAGE_KEY = "ark-library:language:v1";
 const UUID = /^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i;
 
@@ -33,7 +35,43 @@ export function readPosition(mangaId: string, storage: Pick<Storage, "getItem"> 
       feedPage: value.feedPage, page: value.page, offset: value.offset, completed: value.completed === true };
   } catch { return null; }
 }
-export function readReaderPreferences(storage: Pick<Storage, "getItem"> = localStorage): ReaderPreferences {
+export function validReaderPreferences(value: unknown): value is ReaderPreferences {
+  const p = value as ReaderPreferences;
+  return !!p && ['vertical', 'paged'].includes(p.mode) && ['original', 'compressed'].includes(p.quality) && ['fit', 'screen', 'native'].includes(p.size) &&
+    typeof p.width === 'number' && Number.isFinite(p.width) && p.width >= 420 && p.width <= 1100 && (p.controlsHidden === undefined || typeof p.controlsHidden === 'boolean');
+}
+export function validateWorkSettings(value: unknown): WorkReaderSettings {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length > 5000) throw new Error('Ajustes por obra inválidos.');
+  const entries = Object.entries(value).map(([id, raw]) => {
+    const entry = raw as WorkReaderSettings[string];
+    if (!UUID.test(id) || !entry || !validReaderPreferences(entry.settings) || typeof entry.updatedAt !== 'number' || !Number.isFinite(entry.updatedAt) || entry.updatedAt < 0 || entry.updatedAt > 8640000000000000)
+      throw new Error('Ajustes por obra inválidos.');
+    const p = entry.settings;
+    return [id, { settings: { mode: p.mode, quality: p.quality, size: p.size, width: p.width, ...(p.controlsHidden !== undefined ? { controlsHidden: p.controlsHidden } : {}) }, updatedAt: entry.updatedAt }];
+  });
+  return Object.fromEntries(entries);
+}
+export function readWorkSettings(storage: Pick<Storage, 'getItem'> = localStorage): WorkReaderSettings {
+  try {
+    const raw = JSON.parse(storage.getItem(WORK_SETTINGS_KEY) || '{}');
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).length > 5000) return {};
+    return Object.assign({}, ...Object.entries(raw).map(([id, entry]) => {
+      try { return validateWorkSettings({ [id]: entry }); } catch { return {}; }
+    }));
+  } catch { return {}; }
+}
+export function saveWorkSettings(id: string, settings: ReaderPreferences, storage: Pick<Storage, 'getItem' | 'setItem'> = localStorage) {
+  if (!UUID.test(id) || !validReaderPreferences(settings)) throw new Error('Ajustes por obra inválidos.');
+  const current = readWorkSettings(storage);
+  current[id] = { settings, updatedAt: Date.now() };
+  const entries = Object.entries(current).sort((a, b) => b[1].updatedAt - a[1].updatedAt).slice(0, 5000);
+  storage.setItem(WORK_SETTINGS_KEY, JSON.stringify(Object.fromEntries(entries)));
+}
+export function readReaderPreferences(storage: Pick<Storage, "getItem"> = localStorage, mangaId?: string): ReaderPreferences {
+  if (mangaId) {
+    const saved = readWorkSettings(storage)[mangaId];
+    if (saved) return saved.settings;
+  }
   let value: Partial<ReaderPreferences> = {};
   let oldWidth = 780;
   try { value = JSON.parse(storage.getItem(READER_SETTINGS_KEY) || "{}") || {}; oldWidth = Number(storage.getItem("ark-library:reader-width:v1")) || 780; } catch { /* use defaults */ }

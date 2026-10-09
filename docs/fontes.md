@@ -62,3 +62,7 @@ Para português, a ordem de investigação fica: retestar Pluma quando disponív
 5. Expandir gradualmente para fontes com cobertura complementar. A contagem de APIs deve distinguir catálogo de leitura; não apresentar conexões planejadas como disponíveis.
 
 As melhorias de capítulos lidos/não lidos, preferências por obra, controles móveis, página inicial pessoal, instalação como aplicativo e IA permanecem no plano de evolução. A pesquisa de fontes acrescenta uma prioridade e não substitui essas melhorias.
+
+## Resultado do teste inicial de Comikey Brasil
+
+Em 9 de outubro de 2026, a requisição normal de leitura do catálogo público `https://br.comikey.com/comics/?order=-views&page=1` retornou HTTP 403 nesta máquina. Nenhuma conta, token, assinatura ou método de contorno foi usado. A busca, a seleção de um capítulo e a entrega de páginas reais pelo ARK permanecem não validadas. O resultado não prova que o site está indisponível para navegadores comuns, mas impede considerá-lo uma segunda fonte pronta para o backend hospedado. O próximo avanço requer documentação de uma API disponibilizada para integração ou um acesso normal compatível com as regras do serviço.

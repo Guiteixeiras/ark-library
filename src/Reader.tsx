@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { BookOpen, CheckCheck, ChevronLeft, ChevronRight, ExternalLink, LoaderCircle, Maximize, Minimize, PanelTopClose, PanelTopOpen, X } from "lucide-react";
-import { canonicalChapter, chapterIndex, languageLabel, POSITION_KEY, readPosition, readReaderPreferences, READER_SETTINGS_KEY } from "./reading";
+import { canonicalChapter, chapterIndex, languageLabel, POSITION_KEY, readPosition, readReaderPreferences, saveWorkSettings } from "./reading";
 import type { ReaderPreferences } from "./reading";
 import type { Chapter, Manga } from "./types";
 
@@ -41,7 +41,7 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
   const showControlsButton = useRef<HTMLButtonElement>(null);
   const hideControlsButton = useRef<HTMLButtonElement>(null);
   const [active, setActive] = useState(chapter);
-  const [prefs, setPrefs] = useState(readReaderPreferences);
+  const [prefs, setPrefs] = useState(() => readReaderPreferences(localStorage, manga.id));
   const [currentPage, setCurrentPage] = useState(saved?.page || 0);
   const [pages, setPages] = useState<string[]>([]);
   const [dimensions, setDimensions] = useState("");
@@ -165,7 +165,7 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
     anchor.current = position; restoring.current = true;
     if (patch.mode === "paged" && prefs.mode !== "paged") { visited.current.clear(); if (ready.current.get(position.page)) visited.current.add(position.page); }
     setCurrentPage(position.page); setPrefs(next);
-    try { localStorage.setItem(READER_SETTINGS_KEY, JSON.stringify(next)); }
+    try { saveWorkSettings(manga.id, next); }
     catch { setNotice("A preferência foi aplicada, mas não pôde ser salva neste navegador."); }
   }
   function goPage(page: number) {
@@ -235,6 +235,7 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
         <label className="reader-width">Largura<input aria-label="Largura da leitura" type="range" min="420" max="1100" step="20" value={prefs.width} disabled={prefs.size !== "fit"} onChange={e => changePreferences({ width: Number(e.target.value) })} /></label>
       </div>
       <div className="reader-page-controls">
+        <small className="reader-settings-note">Ajustes desta obra</small>
         {prefs.mode === "paged" && <button className="icon-button" aria-label="Página anterior do capítulo" disabled={currentPage === 0 || !pages.length} onClick={() => goPage(currentPage - 1)}><ChevronLeft size={18} /></button>}
         <span aria-live="polite">{pages.length ? `Página ${currentPage + 1} de ${pages.length}` : "Carregando páginas"}</span>
         {prefs.mode === "paged" && <button className="icon-button" aria-label="Próxima página do capítulo" disabled={currentPage === pages.length - 1 || !pages.length} onClick={() => goPage(currentPage + 1)}><ChevronRight size={18} /></button>}

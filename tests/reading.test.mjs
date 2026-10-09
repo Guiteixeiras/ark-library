@@ -47,3 +47,17 @@ test('announcements compare chapter numbers so alternate scans cannot repeat a d
   assert(!hasUnreadChapter(null, '12'));
   assert.deepEqual(readDismissed(storage({ [`${id(1)}:pt-br`]: 12.5, wrong: 8, [`${id(2)}:en`]: '12' })), { [`${id(1)}:pt-br`]: 12.5 });
 });
+
+test('each work keeps independent reader preferences and legacy defaults remain available', async () => {
+  const { saveWorkSettings, WORK_SETTINGS_KEY, READER_SETTINGS_KEY } = await import('../src/reading.ts');
+  const values = new Map([[READER_SETTINGS_KEY, JSON.stringify({ mode: 'vertical', quality: 'original', size: 'fit', width: 900 })]]);
+  const memory = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+  const a = { mode: 'vertical', quality: 'original', size: 'screen', width: 1000, controlsHidden: true };
+  const b = { mode: 'paged', quality: 'compressed', size: 'native', width: 600, controlsHidden: false };
+  saveWorkSettings(id(1), a, memory); saveWorkSettings(id(2), b, memory);
+  assert.deepEqual(readReaderPreferences(memory, id(1)), a); assert.deepEqual(readReaderPreferences(memory, id(2)), b);
+  assert.equal(readReaderPreferences(memory, id(3)).width, 900);
+  const raw = JSON.parse(values.get(WORK_SETTINGS_KEY)); raw[id(2)].settings.width = -1;
+  values.set(WORK_SETTINGS_KEY, JSON.stringify(raw));
+  assert.deepEqual(readReaderPreferences(memory, id(1)), a); assert.equal(readReaderPreferences(memory, id(2)).width, 900);
+});
