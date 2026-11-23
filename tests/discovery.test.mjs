@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { withPopularity, featuredSlice, recentReleases, releaseFeed } from '../server/discovery.mjs';
+import { withPopularity, featuredSlice, readableFeatured, recentReleases, releaseFeed } from '../server/discovery.mjs';
+import { createReadability } from '../server/readable.mjs';
 const id = '32d76d19-8a05-4db0-9fc2-e0b0648fe9d0';
 const now = Date.parse('2026-10-07T12:00:00Z');
 const manga = { id, title: 'Solo Leveling', originalTitle: 'Solo', kind: 'Manhwa', tags: ['Action'], status: 'completed' };
@@ -44,4 +45,36 @@ test('recent uploads stop before old pages and never query unsupported unlimited
     return { total: 10000, data: Array.from({ length: 100 }, (_, n) => chapter(String(page + n), { readableAt: page === 0 ? recent : old })) };
   }, [manga], 'pt-br');
   assert.equal(paths.length, 2); assert.equal(result.truncated, false); assert.equal(result.items.length, 40);
+});
+
+const upstreamFor = (ids, suspects) => async path => {
+  if (path.startsWith('/statistics')) return { statistics: Object.fromEntries(ids.map(i => [i, { follows: 5000, rating: { bayesian: 8 } }])) };
+  const flagged = new URL('https://api.test' + path).searchParams.get('hasUnavailableChapters') === '1';
+  return { data: (flagged ? suspects : ids).map(i => ({ id: i })) };
+};
+test('featured works without hosted chapters are hidden, suspects are verified first and unknown works stay', async () => {
+  const order = [];
+  const readability = createReadability(async i => { order.push(i); return i === 'b' ? 0 : 5; }, { spacing: 0 });
+  const items = await readableFeatured(upstreamFor(['a', 'b', 'c'], ['b', 'c']), m => m, 'pt-br', readability);
+  assert.deepEqual(items.map(m => m.id), ['a', 'c']);
+  assert.deepEqual(order.slice(0, 2), ['b', 'c']);
+  assert.equal(readability.get('b', 'en'), undefined, 'languages are independent');
+  const slow = createReadability(() => new Promise(resolve => setTimeout(resolve, 60, 0)), { spacing: 0 });
+  assert.deepEqual((await readableFeatured(upstreamFor(['a', 'b'], ['b']), m => m, 'en', slow, 5)).map(m => m.id), ['a', 'b']);
+  await slow.check(['b', 'a'], 'en', 1000);
+  assert.equal((await readableFeatured(upstreamFor(['a', 'b'], ['b']), m => m, 'en', slow, 5)).length, 0);
+});
+test('readability checks are shared, pause after a failure and keep expired answers while refreshing', async () => {
+  let calls = 0, fail = false, clock = 1000;
+  const readability = createReadability(async () => { calls++; if (fail) throw new Error('429'); return 1; }, { spacing: 0, parallel: 1, ttl: 100, backoff: 500, now: () => clock });
+  await Promise.all([readability.check(['a', 'b'], 'en', 500), readability.check(['b', 'a'], 'en', 500)]);
+  assert.equal(calls, 2);
+  clock += 200; fail = true;
+  await readability.check(['a', 'b', 'c'], 'en', 500);
+  assert.equal(calls, 3, 'one failure stops the whole queue');
+  assert.equal(readability.get('a', 'en'), true); assert.equal(readability.get('c', 'en'), undefined);
+  fail = false;
+  await readability.check(['c'], 'en', 500); assert.equal(calls, 3);
+  clock += 600;
+  await readability.check(['c'], 'en', 500); assert.equal(calls, 4); assert.equal(readability.get('c', 'en'), true);
 });

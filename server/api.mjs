@@ -1,6 +1,7 @@
 import { arkApi } from "./ark.mjs";
 import { chapterAvailability, groupChapters, chapterSlice } from "./chapters.mjs";
-import { featuredManga, featuredSlice, releaseFeed } from "./discovery.mjs";
+import { featuredManga, featuredSlice, readableFeatured, releaseFeed } from "./discovery.mjs";
+import { createReadability } from "./readable.mjs";
 import { chapterListOptions, chapterListSlice } from '../src/chapter-browser.ts';
 const API = "https://api.mangadex.org";
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/avif"]);
@@ -51,6 +52,24 @@ async function upstream(path, fresh = false) {
   } finally {
     requests.delete(path);
   }
+}
+
+// Not through upstream(): these many small answers would push useful ones out of its cache.
+const readability = createReadability(async (id, language) => {
+  const params = new URLSearchParams({ limit: "1", includeExternalUrl: "0", includeUnavailable: "0", includeEmptyPages: "0" });
+  languageParams(params, language, "translatedLanguage[]");
+  const response = await fetch(`${API}/manga/${id}/feed?${params}`, {
+    signal: AbortSignal.timeout(15000),
+    headers: { Accept: "application/json", "User-Agent": "ARK-Library/0.1 (personal library)" },
+  });
+  if (!response.ok) throw new Error(`MangaDex respondeu ${response.status}.`);
+  const { total } = await response.json();
+  if (!Number.isInteger(total)) throw new Error("Resposta de capítulos inválida.");
+  return total;
+});
+// Verifies the first page the reader sees before it is asked for. Failures only postpone the check.
+export function warmFeatured() {
+  return readableFeatured(upstream, manga, "pt-br", readability, 0).then(() => undefined, () => undefined);
 }
 
 const assignments = new Map();
@@ -173,7 +192,7 @@ function manga(item) {
 export async function apiMiddleware(req, res, next) {
   const url = new URL(req.url || "/", "http://localhost");
   if (!url.pathname.startsWith("/api/")) return next();
-  if (url.pathname.startsWith("/api/ark/")) return arkApi(req, res, url, { upstream, mapManga: manga }).catch(() => reply(res, 502, { error: "Não foi possível consultar as sugestões agora. Tente novamente." }));
+  if (url.pathname.startsWith("/api/ark/")) return arkApi(req, res, url, { upstream, mapManga: manga, readability }).catch(() => reply(res, 502, { error: "Não foi possível consultar as sugestões agora. Tente novamente." }));
   const listRoute = url.pathname.match(/^\/api\/manga\/([^/]+)\/chapter-list$/);
   if (listRoute) {
     if (req.method !== 'POST') return reply(res, 405, { error: 'Método não permitido.' });
@@ -233,7 +252,7 @@ export async function apiMiddleware(req, res, next) {
       )
         return reply(res, 400, { error: "Busca inválida." });
       if (scope === "featured" && !query) {
-        const items = await featuredManga(upstream, manga, language);
+        const items = await readableFeatured(upstream, manga, language, readability);
         let genreName = null;
         if (genre !== "all") {
           const tags = await upstream("/manga/tag");

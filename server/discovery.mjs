@@ -11,11 +11,30 @@ export function withPopularity(items, statistics) {
       ? [{ ...item, rating, followers }] : [];
   });
 }
-export async function featuredManga(upstream, mapManga, language) {
+function featuredParams(language) {
   const params = new URLSearchParams({ limit: String(FEATURED_LIMIT), 'order[followedCount]': 'desc',
     'includes[]': 'cover_art', hasAvailableChapters: 'true' });
   for (const code of language === 'en' ? ['en'] : ['pt-br', 'pt']) params.append('availableTranslatedLanguage[]', code);
   for (const rating of ['safe', 'suggestive']) params.append('contentRating[]', rating);
+  return params;
+}
+// MangaDex counts removed and external chapters as translations, so a popular work may have nothing to read.
+// Works with removed chapters are verified first; the others are assumed readable until verified.
+export async function readableFeatured(upstream, mapManga, language, readability, wait = 3000) {
+  const items = await featuredManga(upstream, mapManga, language);
+  let suspects = new Set();
+  try {
+    const params = featuredParams(language); params.set('hasUnavailableChapters', '1');
+    suspects = new Set((await upstream(`/manga?${params}`)).data.map(m => m.id));
+  } catch { /* The list still works without this hint. */ }
+  const ids = items.map(m => m.id);
+  const verified = readability.check(ids.filter(id => suspects.has(id)), language, wait);
+  void readability.check(ids.filter(id => !suspects.has(id)), language);
+  await verified;
+  return items.filter(m => readability.get(m.id, language) !== false);
+}
+export async function featuredManga(upstream, mapManga, language) {
+  const params = featuredParams(language);
   const data = await upstream(`/manga?${params}`);
   if (!data.data.length) return [];
   const ids = new URLSearchParams();

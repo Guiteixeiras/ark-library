@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { apiMiddleware } from "./server/api.mjs";
+import { apiMiddleware, warmFeatured } from "./server/api.mjs";
 
 export default defineConfig({
   plugins: [
@@ -9,6 +9,7 @@ export default defineConfig({
       name: "ark-mangadex-api",
       configureServer(server) {
         server.middlewares.use(apiMiddleware);
+        void warmFeatured();
       },
     },
   ],

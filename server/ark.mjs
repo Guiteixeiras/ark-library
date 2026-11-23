@@ -3,7 +3,7 @@ const UUID = /^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i;
 const genres = new Map(GENRES.map(g => [g.name, g.id]));
 const genreLabels = new Map(GENRES.map(g => [g.name, g.label]));
 // Small local models have short contexts: the whole request must leave room for the answer.
-const POOL = 30, PER_KIND = 10, SAMPLE = 15, CONTEXT = 4096, ANSWER = 600, REASON = 350;
+const POOL = 30, VERIFIED = 15, PER_KIND = 10, SAMPLE = 15, CONTEXT = 4096, ANSWER = 600, REASON = 350;
 const TIMEOUT = 180000;
 const clip = (text, limit) => text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}…`;
 function reply(res, status, data) {
@@ -89,7 +89,7 @@ export function parseRecommendations(content, candidates) {
   if (!selected.length) throw new Error('A IA não retornou nenhuma sugestão válida.');
   return selected;
 }
-export async function arkApi(req, res, url, { upstream, mapManga }) {
+export async function arkApi(req, res, url, { upstream, mapManga, readability }) {
   if (url.pathname === '/api/ark/status') {
     if (req.method !== 'GET') return reply(res, 405, { error: 'Método não permitido.' });
     try {
@@ -127,14 +127,21 @@ export async function arkApi(req, res, url, { upstream, mapManga }) {
       params.set(kind === 'familiar' ? 'includedTagsMode' : 'excludedTagsMode', 'OR');
     }
     // Readers often own the most followed works already, so look further down before giving up.
+    // Suggest only what can be read: works without removed chapters, plus the ones already verified.
     const pool = [];
+    const add = (manga, limit) => { if (pool.length < limit && !used.has(manga.id)) { used.add(manga.id); pool.push(manga); } };
+    params.set('hasUnavailableChapters', '0');
     for (let offset = 0; offset < 300 && pool.length < POOL; offset += 100) {
       params.set('offset', String(offset));
       const data = await upstream(`/manga?${params}`);
-      for (const manga of data.data.map(mapManga))
-        if (pool.length < POOL && !used.has(manga.id)) { used.add(manga.id); pool.push(manga); }
+      for (const manga of data.data.map(mapManga)) if (readability?.get(manga.id, body.language) !== false) add(manga, POOL);
       if (data.data.length < 100) break;
     }
+    params.set('hasUnavailableChapters', '1'); params.set('offset', '0');
+    const partial = (await upstream(`/manga?${params}`)).data.map(mapManga).filter(m => !own.has(m.id)).slice(0, POOL);
+    const limit = pool.length + VERIFIED;
+    for (const manga of partial) if (readability?.get(manga.id, body.language) === true) add(manga, limit);
+    void readability?.check(partial.map(m => m.id), body.language);
     // Small models favour the first entries; a new order makes each request different.
     for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
     pool.slice(0, PER_KIND).forEach((manga, i) => candidates.push({ ref: `${kind[0]}${i + 1}`, manga, kind }));

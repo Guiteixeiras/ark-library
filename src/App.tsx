@@ -1158,7 +1158,7 @@ export default function App() {
                 </h2>
                 <p>
                   {view === "discover"
-                    ? !search && scope === 'featured' ? `Até 100 obras mais acompanhadas em ${language === 'en' ? 'inglês' : 'português'}, com nota mínima 7 e mil seguidores no MangaDex.` : `Uma seleção do MangaDex, com capítulos em ${language === "en" ? "inglês" : "português"}.`
+                    ? !search && scope === 'featured' ? `Até 100 obras mais acompanhadas em ${language === 'en' ? 'inglês' : 'português'}, com nota mínima 7, mil seguidores e capítulos para ler no ARK.` : `Uma seleção do MangaDex, com capítulos em ${language === "en" ? "inglês" : "português"}.`
                     : "Um espaço para cada história que faz parte do seu universo."}
                 </p>
               </div>

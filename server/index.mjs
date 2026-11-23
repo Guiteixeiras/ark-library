@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { apiMiddleware } from "./api.mjs";
+import { apiMiddleware, warmFeatured } from "./api.mjs";
 import { createAccessGuard } from "./access.mjs";
 
 const dist = fileURLToPath(new URL("../dist/", import.meta.url));
@@ -44,6 +44,7 @@ createServer((req, res) => {
       res.end("Página não encontrada.");
     }
   });
-}).listen(Number(process.env.PORT || 5173), "0.0.0.0", () =>
-  console.log(`ARK Library iniciada na porta ${process.env.PORT || 5173}.`),
-);
+}).listen(Number(process.env.PORT || 5173), "0.0.0.0", () => {
+  console.log(`ARK Library iniciada na porta ${process.env.PORT || 5173}.`);
+  void warmFeatured();
+});

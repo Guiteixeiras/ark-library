@@ -68,3 +68,28 @@ test('hosted Ollama connection failure identifies a PC-only localhost configurat
     assert.deepEqual(result.models, []);
   } finally { globalThis.fetch = original; if (oldRender === undefined) delete process.env.RENDER; else process.env.RENDER = oldRender; }
 });
+
+test('AI only receives works that can be read', async () => {
+  const original = globalThis.fetch;
+  const req = Readable.from([JSON.stringify({ language: 'pt-br', items: [item(1, ['Action'])] })]); req.method = 'POST';
+  const verdicts = { [id(2)]: undefined, [id(3)]: false, [id(4)]: true, [id(5)]: false, [id(6)]: undefined };
+  let titles, checked = [];
+  try {
+    globalThis.fetch = async (url, options) => {
+      if (url.endsWith('/api/tags')) return Response.json({ models: [{ name: 'gemma3:4b' }] });
+      titles = JSON.parse(JSON.parse(options.body).messages[1].content).candidatos.map(c => c.titulo).sort();
+      return Response.json({ message: { content: JSON.stringify({ familiar: [{ id: 'f1', reason: 'Motivo' }] }) } });
+    };
+    await arkApi(req, { writeHead() {}, end() {} }, new URL('http://ark.test/api/ark/recommendations'), {
+      upstream: async path => {
+        const p = new URL('https://api.test' + path).searchParams;
+        if (p.has('excludedTags[]')) return { data: [] };
+        return { data: (p.get('hasUnavailableChapters') === '0' ? [2, 3] : [1, 4, 5, 6]).map(n => item(n, ['Action'])) };
+      },
+      mapManga: m => ({ ...m, description: '' }),
+      readability: { get: i => verdicts[i], check: ids => { checked.push(...ids); return Promise.resolve(); } },
+    });
+    assert.deepEqual(titles, ['Title 2', 'Title 4']);
+    assert.deepEqual(checked, [id(4), id(5), id(6)]);
+  } finally { globalThis.fetch = original; }
+});
