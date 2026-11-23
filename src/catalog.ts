@@ -67,3 +67,9 @@ export const LANGUAGES = [
   ["pt-br", "Português"],
   ["en", "Inglês"],
 ];
+// Only for the chapters of one work; the catalogue keeps a single language per search.
+export const CHAPTER_LANGUAGES = [
+  LANGUAGES[0],
+  ["pt-en", "Português + inglês onde faltar"],
+  LANGUAGES[1],
+];

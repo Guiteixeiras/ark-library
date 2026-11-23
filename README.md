@@ -83,11 +83,19 @@ Os destaques vêm dos 100 títulos mais acompanhados com traduções disponívei
 
 O ARK usa o mesmo fluxo da sua aplicação Streamlit: servidor do ARK → API HTTP do Ollama → modelo instalado no PC. Não exige uma API de IA hospedada nem uma chave para o Ollama local. Inicie o Ollama como de costume e execute o ARK no mesmo computador com os comandos acima. Os modelos instalados aparecem automaticamente em **Sugestões do ARK**, com preferência por um modelo Llama.
 
-A IA recebe títulos, gêneros, favoritos e status da coleção. Para coleções grandes, recebe também um resumo dos gêneros de todos os itens e até 40 obras como contexto. Os candidatos vêm do catálogo real do MangaDex, excluindo obras já salvas: até três sugestões próximas dos seus gostos e uma de outro conjunto de gêneros. A resposta é validada contra esses candidatos; obras inventadas, IDs repetidos e respostas inválidas são rejeitados. Textos de motivos são sugestões da IA e podem conter erros.
+A IA recebe títulos, gêneros, favoritos e status da coleção. Para coleções grandes, recebe um resumo dos gêneros de todos os itens e até 15 obras como contexto, com favoritas primeiro. Os candidatos vêm do catálogo real do MangaDex, excluindo obras já salvas: até três sugestões próximas dos seus gostos e uma de outro conjunto de gêneros. O pedido cabe em um contexto de 4.096 tokens e usa uma resposta estruturada, restrita aos candidatos oferecidos; entradas inventadas ou repetidas são descartadas sem perder as válidas. Os candidatos mudam de ordem a cada pedido. Falhas da IA aparecem no terminal do servidor com o prefixo `[ARK IA]`.
+
+Para começar, instale o Ollama, deixe-o aberto e baixe um modelo, por exemplo `ollama pull gemma3:4b` (cerca de 3,3 GB). Esse modelo foi testado com o ARK em uma placa de vídeo de 6 GB. Textos de motivos são sugestões da IA e podem conter erros.
 
 O endereço padrão é `http://127.0.0.1:11434`. Opcionalmente, copie `.env.example` para `.env` e configure `ARK_OLLAMA_URL` ou `ARK_OLLAMA_MODEL`. Os scripts de desenvolvimento e produção leem esse arquivo; `.env` é ignorado pelo Git. `OLLAMA_HOST` também é aceito como endereço. O modelo deve estar instalado; o ARK não baixa modelos automaticamente.
 
-Na nuvem, `localhost` aponta para a máquina da nuvem, e não para seu PC. Sem um Ollama acessível ao servidor do ARK, a interface mostra **Ollama desconectado** e as demais funções continuam disponíveis. Para uso pessoal, execute ambos no seu PC. A integração e o protocolo foram testados com respostas controladas; a inferência real depende de executar com o seu Ollama.
+Na nuvem, `localhost` aponta para a máquina da nuvem, e não para seu PC. Sem um Ollama acessível ao servidor do ARK, a interface mostra **Ollama desconectado** e as demais funções continuam disponíveis. Para uso pessoal, execute ambos no seu PC. Os testes automáticos usam respostas controladas.
+
+## Disponibilidade das traduções
+
+Nem todo capítulo catalogado no MangaDex pode ser lido: muitos ficam indisponíveis, em geral quando a obra é licenciada. Os detalhes da obra mostram quantos capítulos existem no idioma, quantos estão indisponíveis e os links de plataformas indicados pelo próprio MangaDex. O ARK não contorna essas retiradas.
+
+Em **Idioma da leitura**, **Português + inglês onde faltar** mantém o português e completa apenas os capítulos ausentes com inglês, sempre identificados na lista e no leitor. A opção é escolhida por obra, nunca ativada sozinha, e é lembrada ao retomar a leitura.
 
 ## Integrações futuras
 

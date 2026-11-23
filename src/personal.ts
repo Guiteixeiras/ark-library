@@ -1,6 +1,6 @@
 import { cleanItem, createBackup, MAX_BACKUP_BYTES, mergeCollections, newItem, parseBackup, STORAGE_KEY, validItem } from './library.ts';
 import { canonicalChapter, LANGUAGE_KEY, POSITION_KEY, readPosition, readReaderPreferences, READER_SETTINGS_KEY, readWorkSettings, validateWorkSettings, WORK_SETTINGS_KEY } from './reading.ts';
-import { readDismissed, UPDATES_KEY } from './updates.ts';
+import { readDismissed, UPDATES_KEY } from './dismissed.ts';
 import type { Position, ReaderPreferences, ReadingLanguage, WorkReaderSettings } from './reading.ts';
 import type { Chapter, Collection, Manga } from './types';
 

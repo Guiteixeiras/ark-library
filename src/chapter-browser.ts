@@ -1,11 +1,11 @@
 import type { Chapter } from './types';
 
-export type ChapterListOptions = { language: 'pt-br' | 'en'; page: number; query: string; order: 'asc' | 'desc'; filter: 'all' | 'read' | 'unread'; through: string; completed: string[] };
+export type ChapterListOptions = { language: 'pt-br' | 'pt-en' | 'en'; page: number; query: string; order: 'asc' | 'desc'; filter: 'all' | 'read' | 'unread'; through: string; completed: string[] };
 const NUMBER = /^\d+(?:\.\d+)?$/;
 const UUID = /^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i;
 export function chapterListOptions(raw: unknown): ChapterListOptions {
   const o = raw as ChapterListOptions;
-  if (!o || !['pt-br', 'en'].includes(o.language) || !Number.isInteger(o.page) || o.page < 1 || o.page > 250 ||
+  if (!o || !['pt-br', 'pt-en', 'en'].includes(o.language) || !Number.isInteger(o.page) || o.page < 1 || o.page > 250 ||
       typeof o.query !== 'string' || o.query.length > 120 || !['asc', 'desc'].includes(o.order) || !['all', 'read', 'unread'].includes(o.filter) ||
       typeof o.through !== 'string' || o.through.length > 12 || o.through !== '' && !NUMBER.test(o.through) ||
       !Array.isArray(o.completed) || o.completed.length > 500 || o.completed.some(id => typeof id !== 'string' || !UUID.test(id)))

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { BookOpen, CheckCheck, ChevronLeft, ChevronRight, ExternalLink, LoaderCircle, Maximize, Minimize, PanelTopClose, PanelTopOpen, X } from "lucide-react";
-import { canonicalChapter, chapterIndex, languageLabel, POSITION_KEY, readPosition, readReaderPreferences, saveWorkSettings } from "./reading";
+import { allPagesSeen, canonicalChapter, chapterIndex, languageLabel, pagesBefore, POSITION_KEY, readPosition, readReaderPreferences, saveWorkSettings } from "./reading";
 import type { ReaderPreferences } from "./reading";
 import type { Chapter, Manga } from "./types";
 
@@ -36,7 +36,7 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
   const anchor = useRef<{ page: number; offset: number } | null>(saved && { page: saved.page, offset: saved.offset });
   const restoring = useRef(!!saved);
   const ready = useRef(new Map<number, boolean>());
-  const visited = useRef(new Set<number>());
+  const visited = useRef(pagesBefore(saved?.page || 0));
   const recorded = useRef(new Set<string>());
   const showControlsButton = useRef<HTMLButtonElement>(null);
   const hideControlsButton = useRef<HTMLButtonElement>(null);
@@ -97,7 +97,7 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
         if (response.ok) {
           if (controller.signal.aborted) return;
           if (candidate.id !== active.id) {
-            anchor.current = null; restoring.current = false; setCurrentPage(0);
+            anchor.current = null; restoring.current = false; visited.current.clear(); setCurrentPage(0);
             setNotice("Abrimos uma tradução disponível deste capítulo.");
           }
           setActive(candidate);
@@ -139,10 +139,12 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
     if (!pages.length || !scroll.current || !end.current || restoring.current) return;
     const allRead = prefs.mode === "vertical"
       ? ready.current.size === pages.length && [...ready.current.values()].every(Boolean)
-      : currentPageRef.current === pages.length - 1 && visited.current.size === pages.length && ready.current.get(currentPageRef.current);
+      : currentPageRef.current === pages.length - 1 && allPagesSeen(visited.current, pages.length) && ready.current.get(currentPageRef.current);
     const a = end.current.getBoundingClientRect(), b = scroll.current.getBoundingClientRect();
     if (allRead && a.top < b.bottom && a.bottom > b.top) markComplete();
   }
+  // A page counts once shown, even when turned before its image finishes loading; failed images are dropped in pageReady.
+  useEffect(() => { if (pages.length && prefs.mode === "paged") visited.current.add(currentPage); }, [pages, prefs.mode, currentPage]);
   const markRef = useRef(maybeComplete); markRef.current = maybeComplete;
   useEffect(() => {
     if (!pages.length || !end.current || !scroll.current) return;
@@ -154,7 +156,8 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
   function pageReady(index: number, ok: boolean, width?: number, height?: number) {
     if (ok && !recorded.current.has(active.id)) { recorded.current.add(active.id); onRead(active); }
     ready.current.set(index, ok);
-    if (ok && (prefs.mode === "vertical" || index === currentPageRef.current)) visited.current.add(index);
+    if (!ok) visited.current.delete(index);
+    else if (prefs.mode === "vertical" || index === currentPageRef.current) visited.current.add(index);
     if (ok && (index === currentPageRef.current || index === 0)) setDimensions(`${width} × ${height}`);
     applyAnchor();
     maybeComplete();
@@ -163,7 +166,7 @@ export default function Reader({ manga, chapter, chapters, feedPage, feedLanguag
     const next = { ...prefs, ...patch };
     const position = visiblePosition();
     anchor.current = position; restoring.current = true;
-    if (patch.mode === "paged" && prefs.mode !== "paged") { visited.current.clear(); if (ready.current.get(position.page)) visited.current.add(position.page); }
+    if (patch.mode === "paged" && prefs.mode !== "paged") visited.current = pagesBefore(position.page);
     setCurrentPage(position.page); setPrefs(next);
     try { saveWorkSettings(manga.id, next); }
     catch { setNotice("A preferência foi aplicada, mas não pôde ser salva neste navegador."); }

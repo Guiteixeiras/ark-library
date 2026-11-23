@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { groupChapters, chapterSlice } from '../server/chapters.mjs';
-import { chapterIndex, readPosition, readReaderPreferences, preferredLanguage } from '../src/reading.ts';
-import { hasUnreadChapter, readDismissed } from '../src/updates.ts';
+import { readdirSync } from 'node:fs';
+import { chapterAvailability, groupChapters, chapterSlice } from '../server/chapters.mjs';
+import { allPagesSeen, chapterIndex, pagesBefore, readPosition, readReaderPreferences, preferredLanguage } from '../src/reading.ts';
+import { hasUnreadChapter, readDismissed } from '../src/dismissed.ts';
 const id = n => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
 function raw(n, number, overrides = {}) { return { id: id(n), attributes: { chapter: number, volume: '1', title: '', translatedLanguage: 'pt-br', pages: 10, updatedAt: '2026-01-01', ...overrides }, relationships: [{ type: 'scanlation_group', attributes: { name: `Group ${n}` } }] }; }
 const storage = value => ({ getItem() { return JSON.stringify(value); } });
@@ -22,6 +23,34 @@ test('resume locates a chapter after consolidation and progress without a saved 
   assert.equal(next.startId, chapters[61].id);
   const last = chapterSlice(chapters, { page: 1, chapterId: null, chapterNumber: null, after: '100' });
   assert.equal(last.startId, chapters.at(-1).id);
+});
+test('source names stay distinct on case-insensitive systems such as Windows', () => {
+  const names = readdirSync(new URL('../src/', import.meta.url)).map(name => name.replace(/\.[^.]+$/, '').toLowerCase());
+  assert.deepEqual(names.filter((name, i) => names.indexOf(name) !== i), []);
+});
+test('page-by-page reading completes after resuming, but not after jumping over pages', () => {
+  const resumed = pagesBefore(26);
+  for (const page of [26, 27]) resumed.add(page);
+  assert(!allPagesSeen(resumed, 29));
+  resumed.add(28); assert(allPagesSeen(resumed, 29));
+  const jumped = pagesBefore(0); jumped.add(0); jumped.add(28);
+  assert(!allPagesSeen(jumped, 29)); assert(!allPagesSeen(new Set(), 0));
+});
+test('English fills only the missing Portuguese chapters and the choice survives resuming', () => {
+  const chapters = groupChapters([raw(1, '1', { translatedLanguage: 'en', updatedAt: '2026-11-01' }), raw(2, '1', { translatedLanguage: 'pt' }), raw(3, '2', { translatedLanguage: 'en' })]);
+  assert.deepEqual(chapters.map(c => [c.number, c.language]), [['1', 'pt'], ['2', 'en']]);
+  const saved = readPosition(id(2), storage({ chapter: { ...chapters[1], title: '' }, feedLanguage: 'pt-en', feedPage: 1, page: 0, offset: 0 }));
+  assert.equal(saved.feedLanguage, 'pt-en');
+});
+test('availability separates readable, removed and linked chapters and rejects unsafe links', () => {
+  const items = [raw(1, '1'), raw(2, '1', { isUnavailable: true }), raw(3, '2', { isUnavailable: true }), raw(4, '3', { pages: 0, externalUrl: 'https://br.comikey.com/read/3/' }),
+    raw(5, '3', { pages: 0, externalUrl: 'https://br.comikey.com/read/3-again/' }), raw(6, '4', { pages: 0, externalUrl: 'javascript:alert(1)' }), raw(7, '5', { pages: 0, isUnavailable: true, externalUrl: 'https://gone.test/5' }),
+    raw(8, '2', { translatedLanguage: 'en' }), raw(9, '1', { translatedLanguage: 'en' })];
+  const pt = chapterAvailability(items, 'pt-br');
+  assert.deepEqual({ ...pt, external: pt.external.map(c => [c.number, c.host]) }, { known: 5, readable: 1, unavailable: 3, english: 1, external: [['3', 'br.comikey.com']] });
+  const both = chapterAvailability(items, 'pt-en');
+  assert.equal(both.readable, 2); assert.equal(both.english, 0);
+  assert.equal(chapterAvailability(items, 'en').known, 2);
 });
 test('legacy reader position is preserved and corrupted or unsupported records are ignored', () => {
   const value = { chapter: { id: id(1), title: 'Title', number: '12.5', language: 'en', group: 'Group', url: 'https://untrusted.test' }, page: 3, offset: .4, feedPage: 2, feedLanguage: 'en' };

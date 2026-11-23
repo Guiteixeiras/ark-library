@@ -1,9 +1,10 @@
 import { arkApi } from "./ark.mjs";
-import { groupChapters, chapterSlice } from "./chapters.mjs";
+import { chapterAvailability, groupChapters, chapterSlice } from "./chapters.mjs";
 import { featuredManga, featuredSlice, releaseFeed } from "./discovery.mjs";
 import { chapterListOptions, chapterListSlice } from '../src/chapter-browser.ts';
 const API = "https://api.mangadex.org";
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/avif"]);
+const FEED_LANGUAGES = ["pt-br", "pt-en", "en"];
 const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 const cache = new Map();
 const requests = new Map();
@@ -89,7 +90,7 @@ async function assignment(id, fresh = false) {
 const chapterIndexes = new Map();
 const indexRequests = new Map();
 function languageParams(params, language, key) {
-  for (const code of language === "pt-br" ? ["pt-br", "pt"] : ["en"])
+  for (const code of { "pt-br": ["pt-br", "pt"], "pt-en": ["pt-br", "pt", "en"] }[language] || ["en"])
     params.append(key, code);
 }
 async function chapterIndex(id, language, fresh = false) {
@@ -115,6 +116,18 @@ async function chapterIndex(id, language, fresh = false) {
   })();
   indexRequests.set(key, pending);
   try { return await pending; } finally { indexRequests.delete(key); }
+}
+async function availability(id, language) {
+  const raw = [];
+  let total = 0;
+  do {
+    const params = new URLSearchParams({ limit: "500", offset: String(raw.length), "order[chapter]": "asc", includeUnavailable: "1" });
+    languageParams(params, "pt-en", "translatedLanguage[]");
+    const data = await upstream(`/manga/${id}/feed?${params}`);
+    raw.push(...data.data); total = data.total;
+    if (!data.data.length) break;
+  } while (raw.length < Math.min(total, 10000));
+  return chapterAvailability(raw, language);
 }
 function qualityMode(url) {
   const quality = url.searchParams.get("quality") || "original";
@@ -296,7 +309,7 @@ export async function apiMiddleware(req, res, next) {
       const page = Number(url.searchParams.get("page") || 1);
       if (!Number.isInteger(page) || page < 1 || page > 250)
         return reply(res, 400, { error: "Página de capítulos inválida." });
-      if (!["pt-br", "en"].includes(language))
+      if (!FEED_LANGUAGES.includes(language))
         return reply(res, 400, { error: "Idioma inválido." });
       const chapterId = url.searchParams.get("chapterId");
       const chapterNumber = url.searchParams.get("chapterNumber");
@@ -315,7 +328,7 @@ export async function apiMiddleware(req, res, next) {
     const latestRoute = url.pathname.match(/^\/api\/manga\/([^/]+)\/latest$/);
     if (latestRoute) {
       const id = latestRoute[1], language = url.searchParams.get("language") || "pt-br";
-      if (!UUID.test(id) || !["pt-br", "en"].includes(language))
+      if (!UUID.test(id) || !FEED_LANGUAGES.includes(language))
         return reply(res, 400, { error: "Obra ou idioma inválido." });
       const params = new URLSearchParams({ limit: "100", "order[chapter]": "desc",
         "includes[]": "scanlation_group", includeExternalUrl: "0", includeUnavailable: "0" });
@@ -323,6 +336,13 @@ export async function apiMiddleware(req, res, next) {
       const data = await upstream(`/manga/${id}/feed?${params}`);
       const numbered = groupChapters(data.data).filter(c => /^\d+(?:\.\d+)?$/.test(c.number || ""));
       return reply(res, 200, { chapter: numbered.at(-1) || null });
+    }
+    const availabilityRoute = url.pathname.match(/^\/api\/manga\/([^/]+)\/availability$/);
+    if (availabilityRoute) {
+      const id = availabilityRoute[1], language = url.searchParams.get("language") || "pt-br";
+      if (!UUID.test(id) || !FEED_LANGUAGES.includes(language))
+        return reply(res, 400, { error: "Obra ou idioma inválido." });
+      return reply(res, 200, await availability(id, language));
     }
     const pagesRoute = url.pathname.match(/^\/api\/chapter\/([^/]+)\/pages$/);
     if (pagesRoute) {

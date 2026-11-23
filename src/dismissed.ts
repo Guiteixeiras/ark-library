@@ -10,6 +10,6 @@ export function readDismissed(storage: Pick<Storage, "getItem"> = localStorage):
     const value = JSON.parse(storage.getItem(UPDATES_KEY) || "{}");
     if (!value || typeof value !== "object" || Array.isArray(value)) return {};
     return Object.fromEntries(Object.entries(value).filter(([key, n]) =>
-      /^[a-f\d-]{36}:(pt-br|en)$/i.test(key) && typeof n === "number" && Number.isFinite(n) && n >= 0)) as Record<string, number>;
+      /^[a-f\d-]{36}:(pt-br|pt-en|en)$/i.test(key) && typeof n === "number" && Number.isFinite(n) && n >= 0)) as Record<string, number>;
   } catch { return {}; }
 }

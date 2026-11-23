@@ -51,9 +51,14 @@ export default function Recommendations({ collection, language, renderCard }: {
     </div>
     <div className="ai-connection">
       <span className={connected ? "connected" : ""}>{checking ? "Verificando sua IA…" : connected ? "Ollama conectado" : "Ollama desconectado"}</span>
-      {!connected && !checking && <p>{connectionReason === 'hosted-local-ollama' ? 'Este ARK está hospedado no Render e não consegue acessar o Ollama instalado no seu PC. Para usar sua IA local, execute ambos no PC. Recomendações neste site precisam de uma conexão de IA configurada para a hospedagem.' : 'O servidor do ARK não conseguiu conectar ao Ollama. Para usar sua IA local, inicie o Ollama e execute o ARK no mesmo PC.'}</p>}
+      {!connected && !checking && <p>{connectionReason === 'hosted-local-ollama' ? 'Este ARK está hospedado no Render e não consegue acessar o Ollama instalado no seu PC. Para usar sua IA local, execute ambos no PC. Recomendações neste site precisam de uma conexão de IA configurada para a hospedagem.' : 'O ARK não encontrou o Ollama, o programa que roda a IA no seu PC.'}</p>}
       {!checking && <button className="secondary-button" onClick={() => setRetry(retry + 1)}><RefreshCw size={15} /> Verificar conexão</button>}
-      {connected && !models.length && <p>Instale um modelo no Ollama para começar.</p>}
+      {!connected && !checking && connectionReason !== 'hosted-local-ollama' && <ol className="ai-steps">
+        <li>Instale o Ollama em <a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer">ollama.com/download</a> e deixe-o aberto.</li>
+        <li>Baixe um modelo pelo terminal: <code>ollama pull gemma3:4b</code></li>
+        <li>Volte aqui e clique em <strong>Verificar conexão</strong>.</li>
+      </ol>}
+      {connected && !models.length && <p>O Ollama está aberto, mas sem nenhum modelo. No terminal, use <code>ollama pull gemma3:4b</code> e verifique a conexão.</p>}
       {connected && !profile.length && <p>Adicione suas primeiras obras à coleção para receber sugestões.</p>}
       <button className="primary-button" disabled={!connected || !model || !profile.length || loading} onClick={() => void generate()}>
         {loading ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}{loading ? "ARK está escolhendo…" : items.length ? "Outras sugestões" : "Pedir sugestões ao ARK"}

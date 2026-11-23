@@ -29,7 +29,8 @@ import {
   readCollection,
   STORAGE_KEY,
 } from "./library";
-import { GENRES, LANGUAGES, PAGE_SIZE } from "./catalog";
+import { CHAPTER_LANGUAGES, GENRES, LANGUAGES, PAGE_SIZE } from "./catalog";
+import Availability from "./Availability";
 import Reader from "./Reader";
 import Updates from "./Updates";
 import Recommendations from "./Recommendations";
@@ -37,7 +38,8 @@ import Releases from "./Releases";
 import { History, Lists, ListMembership } from "./PersonalLibrary";
 import { createFullBackup, parseFullBackup, PERSONAL_KEY, readPersonal, recordReading, restoreFullBackup } from "./personal";
 import type { FullBackup, Personal } from "./personal";
-import { chapterIndex, LANGUAGE_KEY, preferredLanguage as readLanguage, readPosition } from "./reading";
+import { chapterIndex, LANGUAGE_KEY, preferredLanguage as readLanguage, readPosition, toFeedLanguage } from "./reading";
+import type { FeedLanguage } from "./reading";
 import type {
   Chapter,
   Collection,
@@ -187,9 +189,10 @@ function Details({
   const pendingNavigation = useRef<-1 | 1 | null>(null);
   const returnToDetails = useRef(!(startReading || requestedChapter));
   const resume = readPosition(manga.id);
-  const [chapterLanguage, setChapterLanguage] = useState(
-    requestedChapter ? (requestedChapter.language === "en" ? "en" : "pt-br") : initialPosition.current?.feedLanguage || (preferredLanguage === "en" ? "en" : "pt-br"),
+  const [chapterLanguage, setChapterLanguage] = useState<FeedLanguage>(
+    resume?.feedLanguage === "pt-en" ? "pt-en" : requestedChapter ? (requestedChapter.language === "en" ? "en" : "pt-br") : initialPosition.current?.feedLanguage || (preferredLanguage === "en" ? "en" : "pt-br"),
   );
+  function selectChapterLanguage(language: FeedLanguage) { setChapterLanguage(language); setChapterPage(1); setListPage(1); }
   const [listItems, setListItems] = useState<(Chapter & { isRead: boolean })[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState('');
@@ -201,7 +204,7 @@ function Details({
   const [listFilter, setListFilter] = useState<'all' | 'read' | 'unread'>('all');
   const [listInfo, setListInfo] = useState({ total: 0, availableTotal: 0, readTotal: 0, truncated: false });
   const completedIds = JSON.stringify(personal.history.filter(h => h.manga.id === manga.id && h.completed &&
-    (h.chapter.language === 'en') === (chapterLanguage === 'en')).map(h => h.chapter.id).sort());
+    (chapterLanguage === 'pt-en' || (h.chapter.language === 'en') === (chapterLanguage === 'en'))).map(h => h.chapter.id).sort());
   useEffect(() => {
     const timer = setTimeout(() => setAppliedQuery(listQuery.trim()), 250);
     return () => clearTimeout(timer);
@@ -425,9 +428,9 @@ function Details({
             <select
               aria-label="Idioma da leitura"
               value={chapterLanguage}
-              onChange={(e) => { setChapterLanguage(e.target.value === "en" ? "en" : "pt-br"); setChapterPage(1); setListPage(1); }}
+              onChange={(e) => selectChapterLanguage(toFeedLanguage(e.target.value))}
             >
-              {LANGUAGES.map(([value, label]) => (
+              {CHAPTER_LANGUAGES.map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
                 </option>
@@ -462,7 +465,7 @@ function Details({
                     <span>
                       Cap. {c.number || "especial"} {c.title && `— ${c.title}`}
                     </span>
-                    <small><span className="chapter-read-badge">{c.isRead ? 'Lido' : 'Não lido'}</span> {c.group}</small>
+                    <small><span className="chapter-read-badge">{c.isRead ? 'Lido' : 'Não lido'}</span> {chapterLanguage === 'pt-en' && c.language === 'en' && <span className="chapter-english-badge">Inglês</span>} {c.group}</small>
                   </button>
                   <button
                     className="icon-button"
@@ -492,6 +495,7 @@ function Details({
           </div>}
           {listInfo.truncated && <p className="chapter-summary">Esta obra excede o limite de consulta de 10.000 versões do MangaDex. Alguns capítulos podem não aparecer.</p>}
           {error && <p role="alert" className="error-copy">{error}</p>}
+          <Availability mangaId={manga.id} language={chapterLanguage} onAddEnglish={() => selectChapterLanguage("pt-en")} />
           <a
             className="text-link"
             href={manga.url}

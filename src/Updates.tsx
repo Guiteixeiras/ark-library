@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Bell, Check, LoaderCircle, RefreshCw, X } from "lucide-react";
 import { languageLabel, readPosition } from "./reading";
-import { hasUnreadChapter, readDismissed, UPDATES_KEY } from "./updates";
+import { hasUnreadChapter, readDismissed, UPDATES_KEY } from "./dismissed";
 import type { ReadingLanguage } from "./reading";
 import type { Chapter, Collection, Manga } from "./types";
 
@@ -78,7 +78,7 @@ export default function Updates({ collection, language, onRead }: {
     {error && <p className="error-copy" role="alert">{error}</p>}
     {unread.length > 0 && <div className="updates-list">
       {(expanded ? unread : unread.slice(0, 3)).map(entry => <article key={entry.key}>
-        <div><strong>{entry.item.manga.title}</strong><span>Capítulo {entry.chapter.number} · {languageLabel(entry.language)}</span></div>
+        <div><strong>{entry.item.manga.title}</strong><span>Capítulo {entry.chapter.number} · {languageLabel(entry.chapter.language)}</span></div>
         <button className="text-link" aria-label={`Ler capítulo ${entry.chapter.number} de ${entry.item.manga.title}`} onClick={() => onRead(entry.item.manga, entry.chapter)}>Ler agora <ArrowRight size={15} /></button>
         <button className="icon-button" aria-label={`Dispensar aviso de ${entry.item.manga.title}`} onClick={() => dismiss([entry])}><Check size={16} /></button>
       </article>)}
